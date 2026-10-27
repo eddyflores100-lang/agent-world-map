@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent World Map — Holographic Globe of MCP Agents</title>
+  <meta name="description" content="Live 3D holographic globe of every agent in the official MCP Registry. Each point is an agent. Hover to inspect, click to see details." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%230a0a0a' stroke='%23ff6b35' stroke-width='2'/><circle cx='30' cy='40' r='2' fill='%23ff6b35'/><circle cx='70' cy='60' r='2' fill='%2300d4ff'/><circle cx='50' cy='50' r='2' fill='%23fafafa'/></svg>" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a;
+      color: #fafafa;
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+    }
+    #canvas-container { position: fixed; inset: 0; }
+
+    header {
+      position: fixed; top: 0; left: 0; right: 0;
+      padding: 14px 24px;
+      background: rgba(10, 10, 15, 0.7);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      z-index: 40;
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 16px;
+    }
+    header h1 {
+      font-size: 16px; font-weight: 700; letter-spacing: 2px;
+      background: linear-gradient(90deg, #ff6b35, #00d4ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header .subtitle { font-size: 11px; opacity: 0.5; margin-top: 2px; }
+    header .stats {
+      display: flex; gap: 16px; font-size: 12px; opacity: 0.7; flex-wrap: wrap;
+    }
+    header .stats span { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+    #loading {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 16px; z-index: 100;
+      background: #0a0a0a;
+    }
+    #loading.hidden { display: none; }
+    .spinner {
+      width: 40px; height: 40px;
+      border: 2px solid #ff6b35;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #filters {
+      position: fixed; left: 16px; top: 80px; z-index: 30;
+      display: flex; flex-direction: column; gap: 4px;
+      max-height: calc(100vh - 100px); overflow-y: auto;
+    }
+    .filter-btn {
+      padding: 5px 11px;
+      background: rgba(255, 255, 255, 0.05);
+      color: #fafafa;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      text-align: left;
+      min-width: 130px;
+      font-family: inherit;
+      transition: all 0.15s ease;
+    }
+    .filter-btn:hover { background: rgba(255, 255, 255, 0.1); }
+    .filter-btn.active {
+      background: #ff6b35;
+      color: #000;
+      border-color: #ff6b35;
+      font-weight: 600;
+    }
+
+    #info-panel {
+      position: fixed; right: 16px; top: 80px; bottom: 16px;
+      width: 380px; max-width: calc(100vw - 32px);
+      background: rgba(10, 10, 15, 0.95);
+      backdrop-filter: blur(20px);
+      border-radius: 12px;
+      padding: 20px;
+      overflow-y: auto;
+      z-index: 50;
+      transform: translateX(420px);
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    #info-panel.open { transform: translateX(0); }
+    #info-panel .close {
+      position: absolute; top: 12px; right: 12px;
+      background: transparent; border: none; color: #fafafa;
+      cursor: pointer; font-size: 22px; line-height: 1; opacity: 0.5;
+    }
+    #info-panel .close:hover { opacity: 1; }
+    .kind-badge {
+      display: inline-block; padding: 4px 10px;
+      border-radius: 4px; font-size: 11px; font-weight: 700; margin-bottom: 12px;
+    }
+    .kind-badge.firewall { background: #ff6b35; color: #000; }
+    .kind-badge.payment  { background: #00d4ff; color: #000; }
+    .kind-badge.compute  { background: #a78bfa; color: #000; }
+    .kind-badge.directory{ background: #fbbf24; color: #000; }
+    .kind-badge.publisher{ background: #22c55e; color: #000; }
+    .kind-badge.bridge   { background: #ec4899; color: #000; }
+    .kind-badge.observer { background: #f43f5e; color: #fff; }
+    .kind-badge.consumer  { background: #94a3b8; color: #000; }
+
+    .agent-name { font-size: 15px; font-weight: 700; line-height: 1.3; word-break: break-all; margin-bottom: 4px; }
+    .agent-version { font-size: 13px; opacity: 0.6; margin-bottom: 16px; font-family: ui-monospace, monospace; }
+    .agent-desc { font-size: 13px; line-height: 1.5; margin-bottom: 16px; opacity: 0.9; }
+    .agent-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .agent-tag {
+      padding: 4px 10px; border-radius: 4px; font-size: 11px;
+      font-family: ui-monospace, monospace;
+    }
+    .agent-tag.x402   { background: rgba(0,212,255,0.1); color: #00d4ff; border: 1px solid rgba(0,212,255,0.4); }
+    .agent-tag.barter  { background: rgba(255,107,53,0.1); color: #ff6b35; border: 1px solid rgba(255,107,53,0.4); }
+    .agent-tag.card    { background: rgba(167,139,250,0.1); color: #a78bfa; border: 1px solid rgba(167,139,250,0.4); }
+    .agent-tag.alive   { background: rgba(34,197,94,0.1); color: #22c55e; border: 1px solid rgba(34,197,94,0.4); }
+
+    .agent-meta {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+      margin-bottom: 16px; padding: 12px;
+      background: rgba(255,255,255,0.04); border-radius: 8px;
+      font-size: 12px;
+    }
+    .agent-meta .label { opacity: 0.5; font-size: 10px; margin-bottom: 2px; }
+    .agent-meta .value { font-family: ui-monospace, monospace; word-break: break-all; }
+
+    .agent-wallet {
+      padding: 12px; background: rgba(255,255,255,0.04); border-radius: 8px;
+      margin-bottom: 16px; font-family: ui-monospace, monospace; font-size: 11px;
+      word-break: break-all;
+    }
+    .agent-wallet .label { opacity: 0.5; font-size: 10px; margin-bottom: 4px; }
+
+    .agent-links { display: flex; flex-direction: column; gap: 8px; }
+    .agent-link {
+      font-size: 12px; text-decoration: none;
+      padding: 8px 12px; border-radius: 6px;
+      background: rgba(255,255,255,0.05);
+      transition: background 0.15s ease;
+      word-break: break-all;
+    }
+    .agent-link:hover { background: rgba(255,255,255,0.1); }
+
+    #hover-tooltip {
+      position: fixed; pointer-events: none; z-index: 60;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-family: ui-monospace, monospace;
+      white-space: nowrap;
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      opacity: 0;
+      transition: opacity 0.1s ease;
+    }
+    #hover-tooltip.visible { opacity: 1; }
+
+    footer {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      padding: 6px 16px;
+      background: rgba(10, 10, 15, 0.7);
+      backdrop-filter: blur(20px);
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 10px; opacity: 0.5; text-align: center;
+      z-index: 30;
+      font-family: ui-monospace, monospace;
+    }
+
+    @media (max-width: 720px) {
+      #filters { left: 8px; top: 70px; max-height: calc(100vh - 80px); }
+      .filter-btn { min-width: 110px; font-size: 10px; padding: 4px 8px; }
+      header { padding: 10px 12px; flex-direction: column; align-items: flex-start; }
+      header .stats { font-size: 10px; gap: 8px; }
+      #info-panel { right: 8px; left: 8px; width: auto; top: auto; bottom: 30px; max-height: 50vh; }
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="spinner"></div>
+    <p style="opacity: 0.6; font-size: 13px;">Scanning MCP Registry for all agents...</p>
+    <p id="loading-detail" style="opacity: 0.3; font-size: 11px; font-family: ui-monospace, monospace;"></p>
+  </div>
+
+  <header>
+    <div>
+      <h1>AGENT WORLD MAP</h1>
+      <div class="subtitle">Holographic globe of every agent in the MCP Registry · live from registry.modelcontextprotocol.io</div>
+    </div>
+    <div class="stats">
+      <span id="stat-total">— agents</span>
+      <span id="stat-x402">— x402</span>
+      <span id="stat-barter">— barter</span>
+      <span id="stat-cards">— cards</span>
+      <span id="stat-countries">— regions</span>
+    </div>
+  </header>
+
+  <div id="filters">
+    <button class="filter-btn active" data-filter="all">🌐 All</button>
+    <button class="filter-btn" data-filter="firewall">🛡️ Firewall</button>
+    <button class="filter-btn" data-filter="payment">💰 Payment</button>
+    <button class="filter-btn" data-filter="compute">⚡ Compute</button>
+    <button class="filter-btn" data-filter="directory">📚 Directory</button>
+    <button class="filter-btn" data-filter="publisher">📤 Publisher</button>
+    <button class="filter-btn" data-filter="bridge">🌉 Bridge</button>
+    <button class="filter-btn" data-filter="observer">🔍 Observer</button>
+    <button class="filter-btn" data-filter="x402">💰 x402 Only</button>
+    <button class="filter-btn" data-filter="barter">🔁 Barter Only</button>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <div id="info-panel">
+    <button class="close" onclick="closePanel()">×</button>
+    <div id="info-content"></div>
+  </div>
+
+  <div id="hover-tooltip"></div>
+
+  <footer id="footer">Loading data from MCP Registry...</footer>
+
+  <script src="https://unpkg.com/three@0.186.1/build/three.min.js"></script>
+  <script>
+    // ─── Region mapping (namespace TLD → geographic center + spread) ─────────────
+    // This gives a believable world distribution without needing IP geo for each agent.
+    // Center is [lat, lon]; spread is the radius in degrees for random jitter.
+
+    const REGIONS = {
+      // US / North America — many com.*, biz.*, io.github.* land here
+      'us':       { center: [39.8, -98.5], spread: 12, color: '#22c55e', label: 'United States' },
+      'us-east':  { center: [40.7, -74.0], spread: 6,  color: '#22c55e', label: 'US East' },
+      'us-west':  { center: [37.7, -122.4],spread: 6,  color: '#22c55e', label: 'US West' },
+      // Europe
+      'eu':       { center: [50.0, 10.0],  spread: 10, color: '#00d4ff', label: 'Europe' },
+      'eu-west':  { center: [51.5, -0.1],  spread: 5,  color: '#00d4ff', label: 'Western Europe' },
+      'eu-east':  { center: [52.5, 13.4],  spread: 5,  color: '#00d4ff', label: 'Central Europe' },
+      // Asia
+      'cn':       { center: [35.0, 105.0], spread: 8,  color: '#ff6b35', label: 'China' },
+      'in':       { center: [20.5, 78.9],  spread: 8,  color: '#fbbf24', label: 'India' },
+      'jp':       { center: [36.0, 138.0], spread: 4,  color: '#ec4899', label: 'Japan' },
+      'kr':       { center: [36.5, 127.8], spread: 3,  color: '#ec4899', label: 'Korea' },
+      'sg':       { center: [1.35, 103.8], spread: 1,  color: '#a78bfa', label: 'Singapore' },
+      'ae':       { center: [24.0, 54.0],  spread: 2,  color: '#a78bfa', label: 'UAE' },
+      'il':       { center: [31.5, 34.8],  spread: 1,  color: '#a78bfa', label: 'Israel' },
+      // Oceania / South America / Africa
+      'au':       { center: [-25.0, 133.0],spread: 8,  color: '#f43f5e', label: 'Australia' },
+      'br':       { center: [-10.0, -55.0],spread: 10, color: '#22c55e', label: 'Brazil' },
+      'za':       { center: [-29.0, 24.0], spread: 4,  color: '#fbbf24', label: 'South Africa' },
+      // Default / unknown — distribute globally
+      'global':   { center: [0, 0], spread: 60, color: '#94a3b8', label: 'Global / Unknown' },
+    };
+
+    // Map namespace prefix → region
+    function regionForNamespace(ns) {
+      const lower = ns.toLowerCase();
+      // TLD-based heuristics
+      if (lower.startsWith('ae.'))   return 'ae';
+      if (lower.startsWith('br.'))   return 'br';
+      if (lower.startsWith('cn.'))   return 'cn';
+      if (lower.startsWith('in.'))   return 'in';
+      if (lower.startsWith('jp.'))   return 'jp';
+      if (lower.startsWith('kr.'))   return 'kr';
+      if (lower.startsWith('sg.'))   return 'sg';
+      if (lower.startsWith('il.'))   return 'il';
+      if (lower.startsWith('au.'))   return 'au';
+      if (lower.startsWith('za.'))   return 'za';
+      if (lower.startsWith('eu.'))   return 'eu';
+      if (lower.startsWith('uk.'))   return 'eu-west';
+      if (lower.startsWith('de.'))   return 'eu-east';
+      if (lower.startsWith('fr.'))   return 'eu-west';
+      if (lower.startsWith('it.'))   return 'eu';
+      if (lower.startsWith('es.'))   return 'eu-west';
+      if (lower.startsWith('nl.'))   return 'eu-west';
+      if (lower.startsWith('ch.'))   return 'eu';
+      if (lower.startsWith('ca.'))   return 'us';
+      if (lower.startsWith('mx.'))   return 'us';
+      if (lower.startsWith('com.'))  return 'us';
+      if (lower.startsWith('biz.'))  return 'us';
+      if (lower.startsWith('ai.'))   return 'us';  // most ai.* are US startups
+      if (lower.startsWith('app.'))  return 'us';
+      if (lower.startsWith('dev.'))  return 'us';
+      if (lower.startsWith('fit.') || lower.startsWith('fitness.')) return 'us';
+      if (lower.startsWith('be.'))   return 'eu-west';
+      if (lower.startsWith('ac.'))   return 'us';
+      if (lower.startsWith('ad.'))   return 'us';
+      if (lower.startsWith('io.github.')) {
+        // GitHub users — distribute globally by hashing the username
+        // This avoids the giant US blob problem; GitHub is global
+        const user = ns.split('/')[0].slice('io.github.'.length);
+        const hash = hashString(user);
+        const regions = ['us-east', 'us-west', 'eu-west', 'eu-east', 'cn', 'in', 'jp', 'br', 'au', 'sg'];
+        return regions[hash % regions.length];
+      }
+      // Default
+      return 'global';
+    }
+
+    function hashString(s) {
+      let h = 0;
+      for (let i = 0; i < s.length; i++) {
+        h = (h * 31 + s.charCodeAt(i)) >>> 0;
+      }
+      return h;
+    }
+
+    // ─── Convert lat/lon → 3D position on sphere of given radius ─────────────────
+    function latLonToVec3(lat, lon, radius) {
+      const phi = (90 - lat) * Math.PI / 180;
+      const theta = (lon + 180) * Math.PI / 180;
+      return new THREE.Vector3(
+        -radius * Math.sin(phi) * Math.cos(theta),
+         radius * Math.cos(phi),
+         radius * Math.sin(phi) * Math.sin(theta)
+      );
+    }
+
+    // ─── Agent kind classifier (mirrors lib/agents.ts) ───────────────────────────
+    function kindFromName(name, description) {
+      const text = `${name} ${description}`.toLowerCase();
+      if (text.includes('firewall') || text.includes('shield') || text.includes('guard')) return 'firewall';
+      if (text.includes('x402') || text.includes('payment') || text.includes('wallet') || text.includes('usdc')) return 'payment';
+      if (text.includes('compute') || text.includes('gpu') || text.includes('inference')) return 'compute';
+      if (text.includes('registry') || text.includes('directory') || text.includes('catalog')) return 'directory';
+      if (text.includes('threat') || text.includes('audit') || text.includes('monitor') || text.includes('ioc')) return 'observer';
+      if (text.includes('bridge') || text.includes('gateway') || text.includes('a2a')) return 'bridge';
+      return 'publisher';
+    }
+
+    const KIND_COLORS = {
+      firewall: 0xff6b35,
+      payment:  0x00d4ff,
+      compute:  0xa78bfa,
+      directory:0xfbbf24,
+      publisher:0x22c55e,
+      bridge:   0xec4899,
+      observer: 0xf43f5e,
+      consumer: 0x94a3b8,
+    };
+
+    // ─── Three.js setup ──────────────────────────────────────────────────────────
+    let scene, camera, renderer, globe, pointsMesh, raycaster, mouse;
+    let agents = [];
+    let filteredAgents = [];
+    let activeFilter = 'all';
+
+    const GLOBE_RADIUS = 100;
+    const POINTS_LAYER = GLOBE_RADIUS * 1.005;
+
+    function init() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x05050a);
+      scene.fog = new THREE.Fog(0x05050a, GLOBE_RADIUS * 2, GLOBE_RADIUS * 6);
+
+      camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, 50, 250);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+      raycaster = new THREE.Raycaster();
+      raycaster.params.Points.threshold = 2;
+      mouse = new THREE.Vector2();
+
+      // Lights
+      scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+      const dirLight = new THREE.DirectionalLight(0xffffff, 0.7);
+      dirLight.position.set(100, 100, 200);
+      scene.add(dirLight);
+
+      // Stars
+      addStars();
+
+      // Globe wireframe + earth-color sphere
+      addGlobe();
+
+      // Load agents
+      loadAgents();
+    }
+
+    function addStars() {
+      const starsGeometry = new THREE.BufferGeometry();
+      const starsCount = 4000;
+      const positions = new Float32Array(starsCount * 3);
+      for (let i = 0; i < starsCount; i++) {
+        const r = 400 + Math.random() * 600;
+        const phi = Math.random() * Math.PI * 2;
+        const theta = Math.acos(2 * Math.random() - 1);
+        positions[i*3]   = r * Math.sin(theta) * Math.cos(phi);
+        positions[i*3+1] = r * Math.sin(theta) * Math.sin(phi);
+        positions[i*3+2] = r * Math.cos(theta);
+      }
+      starsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const starsMaterial = new THREE.PointsMaterial({
+        color: 0xffffff, size: 0.7, transparent: true, opacity: 0.7,
+        sizeAttenuation: true,
+      });
+      scene.add(new THREE.Points(starsGeometry, starsMaterial));
+    }
+
+    function addGlobe() {
+      // Wireframe sphere (Earth)
+      const geo = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 64);
+      const wireMat = new THREE.MeshBasicMaterial({
+        color: 0x222233, wireframe: true, transparent: true, opacity: 0.4,
+      });
+      globe = new THREE.Mesh(geo, wireMat);
+      scene.add(globe);
+
+      // Solid inner sphere (slightly smaller) for depth
+      const innerGeo = new THREE.SphereGeometry(GLOBE_RADIUS * 0.98, 32, 32);
+      const innerMat = new THREE.MeshPhongMaterial({
+        color: 0x0a0a14, transparent: true, opacity: 0.85,
+        shininess: 5,
+      });
+      scene.add(new THREE.Mesh(innerGeo, innerMat));
+
+      // Continents — drawn as a flattened Earth texture using a canvas (simplified)
+      // For a real Earth look, we'd load a texture. Here we use lat/lon grid lines.
+      addLatLonGrid();
+    }
+
+    function addLatLonGrid() {
+      const linesMaterial = new THREE.LineBasicMaterial({
+        color: 0x444466, transparent: true, opacity: 0.25,
+      });
+      // Latitude lines (parallels)
+      for (let lat = -75; lat <= 75; lat += 15) {
+        const points = [];
+        for (let lon = -180; lon <= 180; lon += 4) {
+          points.push(latLonToVec3(lat, lon, GLOBE_RADIUS * 1.001));
+        }
+        const geom = new THREE.BufferGeometry().setFromPoints(points);
+        scene.add(new THREE.Line(geom, linesMaterial));
+      }
+      // Longitude lines (meridians)
+      for (let lon = -180; lon < 180; lon += 15) {
+        const points = [];
+        for (let lat = -85; lat <= 85; lat += 4) {
+          points.push(latLonToVec3(lat, lon, GLOBE_RADIUS * 1.001));
+        }
+        const geom = new THREE.BufferGeometry().setFromPoints(points);
+        scene.add(new THREE.Line(geom, linesMaterial));
+      }
+    }
+
+    function loadAgents() {
+      fetch('all_agents.json')
+        .then(r => r.json())
+        .then(data => {
+          agents = (data.agents || []).map(a => {
+            const kind = kindFromName(a.name, a.description);
+            const regionId = regionForNamespace(a.namespace);
+            const region = REGIONS[regionId];
+            // Compute a deterministic lat/lon within the region
+            const h = hashString(a.name);
+            const h2 = hashString(a.name + a.namespace);
+            const latJitter = ((h % 1000) / 1000 - 0.5) * region.spread * 2;
+            const lonJitter = ((h2 % 1000) / 1000 - 0.5) * region.spread * 2;
+            const lat = region.center[0] + latJitter;
+            const lon = region.center[1] + lonJitter;
+            return {
+              ...a,
+              kind,
+              region: regionId,
+              regionLabel: region.label,
+              regionColor: region.color,
+              lat,
+              lon,
+              position: latLonToVec3(lat, lon, POINTS_LAYER),
+            };
+          });
+
+          // Compute stats
+          const total = agents.length;
+          const withX402 = agents.filter(a => a.x402).length;
+          const withBarter = agents.filter(a => a.barter).length;
+          const withCard = agents.filter(a => a.agent_card).length;
+          const regions = new Set(agents.map(a => a.region));
+
+          document.getElementById('stat-total').textContent = `${total.toLocaleString()} agents`;
+          document.getElementById('stat-x402').textContent = `${withX402} x402`;
+          document.getElementById('stat-barter').textContent = `${withBarter} barter`;
+          document.getElementById('stat-cards').textContent = `${withCard} cards`;
+          document.getElementById('stat-countries').textContent = `${regions.size} regions`;
+
+          document.getElementById('footer').textContent =
+            `${total} agents from ${regions.size} regions · ${data.scan_time || 'live'} · registry.modelcontextprotocol.io · uta-shield v0.3.0`;
+
+          document.getElementById('loading').classList.add('hidden');
+          applyFilter('all');
+        })
+        .catch(err => {
+          document.getElementById('loading-detail').textContent = 'Error: ' + err.message;
+        });
+    }
+
+    function applyFilter(filter) {
+      activeFilter = filter;
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.filter === filter);
+      });
+      if (filter === 'all') {
+        filteredAgents = agents;
+      } else if (filter === 'x402') {
+        filteredAgents = agents.filter(a => a.x402);
+      } else if (filter === 'barter') {
+        filteredAgents = agents.filter(a => a.barter);
+      } else {
+        filteredAgents = agents.filter(a => a.kind === filter);
+      }
+      renderPoints();
+    }
+
+    function renderPoints() {
+      // Remove old points
+      if (pointsMesh) {
+        scene.remove(pointsMesh);
+        pointsMesh.geometry.dispose();
+        pointsMesh.material.dispose();
+      }
+      if (filteredAgents.length === 0) return;
+
+      const positions = new Float32Array(filteredAgents.length * 3);
+      const colors = new Float32Array(filteredAgents.length * 3);
+      const sizes = new Float32Array(filteredAgents.length);
+
+      for (let i = 0; i < filteredAgents.length; i++) {
+        const a = filteredAgents[i];
+        positions[i*3] = a.position.x;
+        positions[i*3+1] = a.position.y;
+        positions[i*3+2] = a.position.z;
+        const c = new THREE.Color(KIND_COLORS[a.kind] || 0xffffff);
+        // Brighter for x402/barter
+        if (a.x402 || a.barter) {
+          c.multiplyScalar(1.5);
+        }
+        colors[i*3] = c.r;
+        colors[i*3+1] = c.g;
+        colors[i*3+2] = c.b;
+        // Size by version_count (log scale), x402/barter = bigger
+        let size = Math.log2((a.versions?.length || 1) + 1) * 0.5 + 0.5;
+        if (a.x402) size += 1;
+        if (a.barter) size += 2;
+        sizes[i] = size;
+      }
+
+      const geometry = new THREE.BufferGeometry();
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+      // Use a circular sprite for nicer-looking points
+      const sprite = createCircleSprite();
+      const material = new THREE.PointsMaterial({
+        size: 1.6,
+        sizeAttenuation: true,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.85,
+        map: sprite,
+        alphaTest: 0.05,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+
+      pointsMesh = new THREE.Points(geometry, material);
+      pointsMesh.userData.agents = filteredAgents;
+      scene.add(pointsMesh);
+    }
+
+    function createCircleSprite() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 64; canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grad.addColorStop(0, 'rgba(255,255,255,1)');
+      grad.addColorStop(0.4, 'rgba(255,255,255,0.6)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 64, 64);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.needsUpdate = true;
+      return tex;
+    }
+
+    // ─── Interaction ─────────────────────────────────────────────────────────────
+    let isDragging = false;
+    let prevX = 0, prevY = 0;
+    let rotation = { x: 0, y: 0 };
+    let rotationVelocity = { x: 0, y: 0.0008 };  // slow auto-rotate
+    let cameraDistance = 250;
+    let hoveredIdx = -1;
+
+    function onPointerDown(e) {
+      isDragging = true;
+      prevX = e.clientX || e.touches?.[0]?.clientX || 0;
+      prevY = e.clientY || e.touches?.[0]?.clientY || 0;
+    }
+    function onPointerMove(e) {
+      const x = e.clientX || e.touches?.[0]?.clientX || 0;
+      const y = e.clientY || e.touches?.[0]?.clientY || 0;
+      if (isDragging) {
+        const dx = x - prevX;
+        const dy = y - prevY;
+        rotationVelocity.y = dx * 0.005;
+        rotationVelocity.x = dy * 0.005;
+        rotation.y += rotationVelocity.y;
+        rotation.x += rotationVelocity.x;
+        rotation.x = Math.max(-Math.PI/2.2, Math.min(Math.PI/2.2, rotation.x));
+        prevX = x; prevY = y;
+      } else {
+        // Hover detection
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((x - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((y - rect.top) / rect.height) * 2 + 1;
+        checkHover();
+      }
+    }
+    function onPointerUp() { isDragging = false; }
+    function onWheel(e) {
+      cameraDistance *= 1 + (e.deltaY > 0 ? 0.1 : -0.1);
+      cameraDistance = Math.max(120, Math.min(500, cameraDistance));
+    }
+    function onClick(e) {
+      if (hoveredIdx >= 0) {
+        showInfo(filteredAgents[hoveredIdx]);
+      }
+    }
+
+    function checkHover() {
+      if (!pointsMesh) return;
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObject(pointsMesh);
+      if (intersects.length > 0) {
+        hoveredIdx = intersects[0].index;
+        const a = filteredAgents[hoveredIdx];
+        const tooltip = document.getElementById('hover-tooltip');
+        tooltip.textContent = `${a.name} · ${a.regionLabel} · v${a.version}`;
+        tooltip.style.left = (e_x) + 'px';
+        tooltip.style.top = (e_y) + 'px';
+        tooltip.classList.add('visible');
+      } else {
+        hoveredIdx = -1;
+        document.getElementById('hover-tooltip').classList.remove('visible');
+      }
+    }
+
+    // We need to track raw mouse coords for tooltip position
+    let e_x = 0, e_y = 0;
+    document.addEventListener('mousemove', (e) => { e_x = e.clientX; e_y = e.clientY; });
+
+    function showInfo(a) {
+      const kindLabels = {
+        firewall: '🛡️ Firewall', payment: '💰 Payment', compute: '⚡ Compute',
+        directory: '📚 Directory', publisher: '📤 Publisher', bridge: '🌉 Bridge',
+        observer: '🔍 Observer', consumer: '👁️ Consumer',
+      };
+      const html = `
+        <div class="kind-badge ${a.kind}">${kindLabels[a.kind]}</div>
+        <div class="agent-name">${a.name}</div>
+        <div class="agent-version">v${a.version} · ${a.versions?.length || 1} versions published</div>
+        <div class="agent-desc">${a.description || '(no description)'}</div>
+        <div class="agent-tags">
+          ${a.x402   ? '<span class="agent-tag x402">💰 x402 Payments</span>' : ''}
+          ${a.barter ? '<span class="agent-tag barter">🔁 Barter Accepted</span>' : ''}
+          ${a.agent_card ? '<span class="agent-tag card">🪪 Agent Card</span>' : ''}
+          <span class="agent-tag alive">● ${a.regionLabel}</span>
+        </div>
+        ${a.wallet ? `
+        <div class="agent-wallet">
+          <div class="label">x402 Wallet (USDC receiver)</div>
+          <div>${a.wallet}</div>
+        </div>` : ''}
+        <div class="agent-meta">
+          <div><div class="label">First seen</div><div class="value">${a.first_seen || '?'}</div></div>
+          <div><div class="label">Last seen</div><div class="value">${a.last_seen || '?'}</div></div>
+          <div><div class="label">Region</div><div class="value">${a.regionLabel}</div></div>
+          <div><div class="label">Lat / Lon</div><div class="value">${a.lat.toFixed(2)} / ${a.lon.toFixed(2)}</div></div>
+        </div>
+        <div class="agent-links">
+          ${a.website ? `<a class="agent-link" href="${a.website}" target="_blank" rel="noopener">→ ${a.website}</a>` : ''}
+          ${a.repository ? `<a class="agent-link" href="${a.repository}" target="_blank" rel="noopener">→ ${a.repository}</a>` : ''}
+          ${a.agent_card ? `<a class="agent-link" href="${a.agent_card}" target="_blank" rel="noopener">→ Agent Card</a>` : ''}
+          <a class="agent-link" href="https://registry.modelcontextprotocol.io/v0/servers?cursor=${encodeURIComponent(a.namespace)}&limit=20" target="_blank" rel="noopener">→ View in MCP Registry</a>
+        </div>
+      `;
+      document.getElementById('info-content').innerHTML = html;
+      document.getElementById('info-panel').classList.add('open');
+    }
+    function closePanel() {
+      document.getElementById('info-panel').classList.remove('open');
+    }
+
+    // ─── Animation loop ──────────────────────────────────────────────────────────
+    function animate() {
+      requestAnimationFrame(animate);
+      if (!isDragging) {
+        // Apply inertia + auto-rotate
+        rotation.y += rotationVelocity.y;
+        rotation.x += rotationVelocity.x;
+        rotationVelocity.y = rotationVelocity.y * 0.95 + 0.0008;  // damp + auto
+        rotationVelocity.x *= 0.95;
+      }
+      // Apply rotation to scene group (globe + points together)
+      globe.rotation.y = rotation.y;
+      globe.rotation.x = rotation.x;
+      if (pointsMesh) {
+        pointsMesh.rotation.y = rotation.y;
+        pointsMesh.rotation.x = rotation.x;
+      }
+      // Rotate the lat/lon grid (children of scene that are not globe or points)
+      scene.children.forEach(obj => {
+        if (obj instanceof THREE.Line) {
+          obj.rotation.y = rotation.y;
+          obj.rotation.x = rotation.x;
+        }
+      });
+      // Position camera
+      camera.position.z = cameraDistance;
+      renderer.render(scene, camera);
+    }
+
+    // ─── Event wiring ───────────────────────────────────────────────────────────
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    const canvas = document.getElementById('canvas-container');
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', onPointerUp);
+    canvas.addEventListener('pointerleave', onPointerUp);
+    canvas.addEventListener('wheel', onWheel, { passive: true });
+    canvas.addEventListener('click', onClick);
+
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => applyFilter(btn.dataset.filter));
+    });
+
+    // Init
+    init();
+    animate();
+  </script>
+</body>
+</html>
