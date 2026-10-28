@@ -11,7 +11,7 @@
 const COUNTRY_TLDS = {
   'ca.':{lat:56,lon:-106,spread:12,label:'Canada'},'mx.':{lat:24,lon:-102,spread:8,label:'Mexico'},
   'br.':{lat:-14,lon:-52,spread:12,label:'Brazil'},'ar.':{lat:-38,lon:-64,spread:8,label:'Argentina'},
-  'cl.':{lat:-35,lon:-71,spread:6,label:'Chile'},'co.':{lat:5,lon:-74,spread:6,label:'Colombia'},
+  'cl.':{lat:-35,lon:-71,spread:6,label:'Chile'},
   'pe.':{lat:-9,lon:-75,spread:6,label:'Peru'},'uk.':{lat:54,lon:-2,spread:4,label:'United Kingdom'},
   'de.':{lat:51,lon:10,spread:5,label:'Germany'},'fr.':{lat:46,lon:2,spread:5,label:'France'},
   'nl.':{lat:52,lon:5,spread:3,label:'Netherlands'},'ch.':{lat:47,lon:8,spread:3,label:'Switzerland'},
@@ -309,36 +309,44 @@ function applyFilter(filter) {
   updateStatsPanel();
 }
 
-// ─── Point rendering — NORMAL blending + depthWrite=true = NO see-through ────
-let pointTex;
+// ─── Point rendering — bright LED spheres with proper depth occlusion ────────
+// Uses InstancedMesh with small glowing spheres — respects depth perfectly,
+// no see-through, and looks like bright LED dots (not dim 80s pixels)
+let pointsInstanced = null;
 function renderPoints() {
-  if (pointsObj) { scene.remove(pointsObj); pointsObj.geometry.dispose(); pointsObj.material.dispose(); }
+  if (pointsInstanced) { scene.remove(pointsInstanced); pointsInstanced.geometry.dispose(); pointsInstanced.material.dispose(); }
   if (!filteredAgents.length) return;
   const N = filteredAgents.length;
-  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
+  // Small sphere geometry — looks like a bright LED dot
+  const sphereGeo = new THREE.SphereGeometry(0.8, 6, 6);
+  const mat = new THREE.MeshBasicMaterial({ vertexColors: false });
+  pointsInstanced = new THREE.InstancedMesh(sphereGeo, mat, N);
+  pointsInstanced.userData.agents = filteredAgents;
+
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
   for (let i = 0; i < N; i++) {
     const a = filteredAgents[i];
-    pos[i*3] = a.position.x; pos[i*3+1] = a.position.y; pos[i*3+2] = a.position.z;
-    const c = new THREE.Color(KIND_COLORS[a.kind] || 0xffffff);
-    if (a.x402) c.multiplyScalar(1.8);
-    if (a.barter) c.multiplyScalar(2.2);
-    col[i*3] = Math.min(c.r, 1); col[i*3+1] = Math.min(c.g, 1); col[i*3+2] = Math.min(c.b, 1);
+    dummy.position.copy(a.position);
+    // Size: base + x402/barter boost
+    let s = 0.5 + Math.log2((a.versions?.length || 1) + 1) * 0.1;
+    if (a.x402) s += 0.5;
+    if (a.barter) s += 0.8;
+    dummy.scale.setScalar(s);
+    dummy.updateMatrix();
+    pointsInstanced.setMatrixAt(i, dummy.matrix);
+
+    // Bright vibrant colors — NOT dim
+    color.setHex(KIND_COLORS[a.kind] || 0xffffff);
+    if (a.x402) color.multiplyScalar(1.5);
+    if (a.barter) color.multiplyScalar(2.0);
+    pointsInstanced.setColorAt(i, color);
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  if (!pointTex) pointTex = ledTexture();
-  const mat = new THREE.PointsMaterial({
-    size: 3, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.9, map: pointTex,
-    alphaTest: 0.01,
-    blending: THREE.NormalBlending,  // NOT additive — additive ignores depth
-    depthWrite: true,   // write depth so globe can occlude points behind it
-    depthTest: true,    // test against globe depth — points behind globe are HIDDEN
-  });
-  pointsObj = new THREE.Points(geo, mat);
-  pointsObj.userData.agents = filteredAgents;
-  scene.add(pointsObj);
+  pointsInstanced.instanceMatrix.needsUpdate = true;
+  pointsInstanced.instanceColor.needsUpdate = true;
+  scene.add(pointsInstanced);
+  // Keep reference for raycasting
+  pointsObj = pointsInstanced;
 }
 
 // ─── Connection arcs ──────────────────────────────────────────────────────────
@@ -498,7 +506,22 @@ function animate() {
     if (obj === pointsObj || obj === globe || obj instanceof THREE.Line || obj instanceof THREE.Points || obj instanceof THREE.Mesh) { obj.rotation.y = rotY; obj.rotation.x = rotX; }
   });
   connectionLines.forEach((l, i) => { if (l.material) l.material.opacity = 0.2 + Math.sin(pulseT + i * 0.5) * 0.15; });
-  if (pointsObj && pointsObj.material) { pointsObj.material.size = 3 + Math.sin(pulseT) * 0.2; }
+  // Pulse the LED spheres
+  if (pointsInstanced) {
+    const dummy = new THREE.Object3D();
+    const baseScale = 1 + Math.sin(pulseT) * 0.1;
+    for (let i = 0; i < filteredAgents.length; i++) {
+      pointsInstanced.getMatrixAt(i, dummy.matrix);
+      dummy.decompose(dummy.position, dummy.quaternion, dummy.scale);
+      let s = 0.5 + Math.log2((filteredAgents[i].versions?.length || 1) + 1) * 0.1;
+      if (filteredAgents[i].x402) s += 0.5;
+      if (filteredAgents[i].barter) s += 0.8;
+      dummy.scale.setScalar(s * baseScale);
+      dummy.updateMatrix();
+      pointsInstanced.setMatrixAt(i, dummy.matrix);
+    }
+    pointsInstanced.instanceMatrix.needsUpdate = true;
+  }
   // Animate satellites
   const sg = scene.userData.satellites;
   if (sg) {
