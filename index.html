@@ -7,24 +7,18 @@
   <meta name="description" content="Technical 3D globe locator of every agent in the official MCP Registry. Geographic distribution, capability analysis, protocol detection, real-time registry data." />
   <meta name="author" content="AliceLabs LLC" />
   <meta name="keywords" content="MCP, agents, AI, registry, x402, barter, security, firewall, globe, 3D, holographic" />
-  <meta property="og:title" content="Agent World Map" />
-  <meta property="og:description" content="Global 3D holographic locator of every agent in the MCP Registry" />
-  <meta property="og:type" content="website" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23050810' stroke='%23ff6b35' stroke-width='2'/><circle cx='30' cy='35' r='1.5' fill='%2322c55e'/><circle cx='70' cy='40' r='1.5' fill='%2300d4ff'/><circle cx='45' cy='60' r='1.5' fill='%23fbbf24'/><circle cx='65' cy='65' r='1.5' fill='%23a78bfa'/><circle cx='50' cy='50' r='2' fill='%23ff6b35'/></svg>" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <!-- Loader -->
   <div id="loader">
     <div class="loader-spinner"></div>
     <div class="loader-text">Initializing Agent World Map</div>
     <div class="loader-detail" id="loader-detail">Connecting to registry.modelcontextprotocol.io...</div>
   </div>
 
-  <!-- Globe canvas -->
   <div id="globe-canvas"></div>
 
-  <!-- Header -->
   <header class="header">
     <div class="header-brand">
       <h1>Agent World Map</h1>
@@ -35,17 +29,19 @@
       <div><span class="stat-label">x402</span><br><span class="stat-value" id="stat-x402">—</span></div>
       <div><span class="stat-label">Barter</span><br><span class="stat-value" id="stat-barter">—</span></div>
       <div><span class="stat-label">Cards</span><br><span class="stat-value" id="stat-cards">—</span></div>
-      <div><span class="stat-label">Regions</span><br><span class="stat-value" id="stat-regions">—</span></div>
+      <div><span class="stat-label">Locations</span><br><span class="stat-value" id="stat-regions">—</span></div>
     </div>
   </header>
 
-  <!-- Left sidebar -->
   <aside class="sidebar-left" id="sidebar-left">
     <div class="sidebar-section">
       <h3>Search</h3>
       <input type="text" class="search-box" id="search" placeholder="agent name, namespace..." />
     </div>
-
+    <div class="sidebar-section">
+      <h3>Controls</h3>
+      <button id="btn-pause" class="filter-btn" style="font-weight:600">⏸ Pause</button>
+    </div>
     <div class="sidebar-section">
       <h3>Filter by Capability</h3>
       <button class="filter-btn active" data-filter="all">
@@ -89,7 +85,6 @@
         <span class="count">—</span>
       </button>
     </div>
-
     <div class="sidebar-section">
       <h3>Special Filters</h3>
       <button class="filter-btn" data-filter="x402">
@@ -103,35 +98,31 @@
         <span class="count">—</span>
       </button>
     </div>
-
     <div class="sidebar-section">
-      <h3>About</h3>
-      <p style="font-size:11px;color:var(--text-dim);line-height:1.6">
-        Live scan of the <a href="https://registry.modelcontextprotocol.io" target="_blank" style="color:var(--accent-orange);text-decoration:none">official MCP Registry</a>.
-        Each point is an agent positioned by namespace TLD analysis.
-        Powered by <a href="https://wall.utalabs.tech" target="_blank" style="color:var(--accent-orange);text-decoration:none">uta-shield</a> v0.3.0.
+      <h3>How to use</h3>
+      <p style="font-size:10px;color:var(--text-dim);line-height:1.5">
+        🖱️ Drag to rotate · Scroll to zoom<br>
+        📍 Click a point for agent details<br>
+        ⏸️ Pause stops auto-rotation<br>
+        🔍 Search filters in real-time<br>
+        🌐 Data from <a href="https://registry.modelcontextprotocol.io" target="_blank" style="color:var(--accent-orange)">MCP Registry</a>
       </p>
     </div>
   </aside>
 
-  <!-- Sidebar toggle -->
   <button class="toggle-sidebar" id="toggle-sidebar" title="Toggle filters">◀</button>
 
-  <!-- Right panel (agent details) -->
   <aside class="panel-right" id="panel-right">
     <button class="panel-close" id="panel-close">×</button>
     <div class="panel-content" id="panel-content"></div>
   </aside>
 
-  <!-- Hover tooltip -->
   <div id="tooltip"></div>
 
-  <!-- Footer -->
   <footer class="footer">
     <span id="footer-text">Loading data from MCP Registry...</span>
   </footer>
 
-  <!-- Scripts -->
   <script src="js/three.js"></script>
   <script src="js/globe.js"></script>
 </body>
