@@ -1,16 +1,11 @@
-/* ─────────────────────────────────────────────────────────────────────────────
- *  Agent World Map — Globe Engine v3.0
- *
- *  Major improvements:
- *  - Canvas-based Earth texture with visible continents (simplified shapes)
- *  - Agents spread using golden-angle spiral (no clustering)
- *  - Points are glowing sprites with additive blending (no pixelation)
- *  - Connection arcs between agents (bezier curves through the globe)
- *  - Pulsing animation for x402/barter agents
- *  - Search by country, name, type
- *  - Smooth zoom + drag + pause + hover-stop
- *  - Better tooltip with agent details
- * ──────────────────────────────────────────────────────────────────────────── */
+/* Agent World Map — Globe Engine v9
+ * - OPAQUE Earth (no see-through, no back lights)
+ * - Auto-rotate ALWAYS, stop ONLY on click/drag (not hover)
+ * - 15 real satellites with names (Starlink, ISS, GPS, etc.)
+ * - Sharp bright LED points (normal blending, depth-correct)
+ * - Country borders (Natural Earth)
+ * - Fly-to-agent + stats panel
+ */
 
 // ─── Country TLDs → geographic region ────────────────────────────────────────
 const COUNTRY_TLDS = {
@@ -40,7 +35,6 @@ const COUNTRY_TLDS = {
   'au.':{lat:-25,lon:133,spread:12,label:'Australia'},'nz.':{lat:-42,lon:172,spread:5,label:'New Zealand'},
 };
 
-// Global tech-hub zones for generic TLDs
 const GLOBAL_ZONES = [
   [37.4,-122],[40.7,-74],[47.6,-122],[30.3,-97.7],[34,-118],[42.4,-71],[39,-77],[25.8,-80.2],
   [51.5,-0.1],[48.9,2.3],[52.5,13.4],[52.4,4.9],[55.7,12.6],[59.3,18.1],[40.4,-3.7],[41.9,12.5],
@@ -59,6 +53,24 @@ const GLOBAL_ZONES = [
   [-12,-77],[10.5,-66.9],[23,-82.4],[19.4,-99.1],[49.2,-123.2],[45.5,-73.6],
 ];
 
+const SAT_DATA = [
+  {name:'ISS (Zarya)', alt:1.3, incl:0.9, phase:0, speed:0.008, color:0xffffff},
+  {name:'Starlink-3045', alt:1.4, incl:0.5, phase:1.2, speed:0.006, color:0x00d4ff},
+  {name:'Starlink-4892', alt:1.42, incl:0.6, phase:2.4, speed:0.006, color:0x00d4ff},
+  {name:'GPS IIF-12', alt:2.0, incl:0.3, phase:0.5, speed:0.003, color:0xff6b35},
+  {name:'GPS III-5', alt:2.0, incl:0.4, phase:1.8, speed:0.003, color:0xff6b35},
+  {name:'Sentinel-2B', alt:1.25, incl:1.1, phase:3.0, speed:0.007, color:0x22c55e},
+  {name:'Sentinel-1A', alt:1.25, incl:1.1, phase:4.2, speed:0.007, color:0x22c55e},
+  {name:'NOAA-20', alt:1.35, incl:0.95, phase:5.4, speed:0.006, color:0xfbbf24},
+  {name:'Landsat-9', alt:1.25, incl:1.15, phase:0.3, speed:0.007, color:0xa78bfa},
+  {name:'Terra', alt:1.25, incl:1.15, phase:1.5, speed:0.007, color:0xa78bfa},
+  {name:'Aqua', alt:1.25, incl:1.15, phase:2.7, speed:0.007, color:0xa78bfa},
+  {name:'Hubble', alt:1.25, incl:0.5, phase:3.9, speed:0.007, color:0xec4899},
+  {name:'GOES-16', alt:3.5, incl:0.05, phase:0, speed:0.001, color:0xf43f5e},
+  {name:'GOES-18', alt:3.5, incl:0.05, phase:3.14, speed:0.001, color:0xf43f5e},
+  {name:'OneWeb-038', alt:1.5, incl:0.6, phase:2.1, speed:0.005, color:0x94a3b8},
+];
+
 function hashString(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
 
 function regionForAgent(name, ns) {
@@ -71,29 +83,15 @@ function regionForAgent(name, ns) {
                label: r.label, country: r.label };
     }
   }
-  // Generic TLD → distribute across global zones (golden angle for even spread)
   const h = hashString(name);
   const zone = GLOBAL_ZONES[h % GLOBAL_ZONES.length];
   const h2 = hashString(name + 'j');
   return { lat: zone[0] + ((h2 % 1000) / 1000 - 0.5) * 4,
            lon: zone[1] + ((hashString(name + 'l') % 1000) / 1000 - 0.5) * 4,
-           label: getCityName(zone), country: getCountryForZone(zone) };
-}
-
-function getCityName(z) {
-  const cities = ['San Francisco','New York','Seattle','Austin','Los Angeles','Boston','Washington DC','Miami',
-    'London','Paris','Berlin','Amsterdam','Copenhagen','Stockholm','Madrid','Rome','Dublin','Milan','Lisbon','Prague','Oslo','Helsinki','Reykjavik',
-    'Tokyo','Seoul','Hong Kong','Singapore','Shanghai','Beijing','Chengdu','Mumbai','Delhi','Bangalore','Bangkok','Manila','Ho Chi Minh City',
-    'Sydney','São Paulo','Buenos Aires','Dubai','Tel Aviv','Istanbul','Cairo','Nairobi','Moscow','Tashkent','Chihuahua','Riyadh','Khartoum',
-    'Johannesburg','Lagos','Malibu','Toronto','Vancouver','DC','Houston','Oakland','Frankfurt','Munich','Manchester','Malmö','Bologna',
-    'Tianjin','Suzhou','Shenzhen','Jakarta','Manila','Taipei','Osaka','Pyongyang','New Delhi','Chennai','Hyderabad','Dubai','Jeddah','Alexandria',
-    'Accra','Lomé','LA','SF','Portland','Denver','New Orleans','Atlanta','San Juan','Bogotá','Lima','Caracas','Havana','Mexico City','Vancouver','Montreal'];
-  const idx = GLOBAL_ZONES.findIndex(z2 => z2[0] === z[0] && z2[1] === z[1]);
-  return cities[idx] || 'Global';
+           label: 'Global', country: getCountryForZone(zone) };
 }
 
 function getCountryForZone(z) {
-  // Simplified country inference from lat/lon
   if (z[1] > -130 && z[1] < -60 && z[0] > 25 && z[0] < 70) return 'United States';
   if (z[1] > -130 && z[1] < -60 && z[0] > 0 && z[0] < 25) return 'Mexico';
   if (z[1] > -140 && z[1] < -50 && z[0] > 40 && z[0] < 70) return 'Canada';
@@ -127,26 +125,30 @@ const KIND_LABELS = {firewall:'Firewall / Protection',payment:'Payment / x402',c
 // ─── Three.js scene ──────────────────────────────────────────────────────────
 let scene, camera, renderer, globe, pointsObj, connectionLines = [];
 let raycaster, mouse, agents = [], filteredAgents = [];
-let activeFilter = 'all', hoveredIdx = -1, isPaused = false;
+let activeFilter = 'all', hoveredIdx = -1;
+let isPaused = false;  // only stops on click, NOT on hover
 let earthTexture;
 
-const R = 100, PR = R * 1.01;
+const R = 100, PR = R * 1.006;
 
-// ─── Earth texture: uses REAL NASA Blue Marble textures loaded from local files ──
-// earth_day.jpg = real satellite imagery with continents, oceans, ice caps
-// earth_specular.jpg = ocean reflection map (bright = water, dark = land)
-// earth_normal.jpg = terrain bump map (mountains, valleys)
-function createEarthTexture() {
-  // We load real textures via THREE.TextureLoader instead of canvas
-  const loader = new THREE.TextureLoader();
-  loader.crossOrigin = '';
-  return loader.load('assets/earth_day.jpg');
+function ledTexture() {
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d');
+  // Sharp bright dot: white center → tight glow → nothing
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 20);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.3, 'rgba(255,255,255,0.8)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.2)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
 }
 
 function initGlobe() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050810);
-  scene.fog = new THREE.Fog(0x050810, 250, 800);
+  scene.fog = new THREE.Fog(0x050810, 300, 800);
 
   camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 2000);
   camera.position.set(0, 60, 280);
@@ -178,132 +180,77 @@ function initGlobe() {
   // ── REAL Earth textures (4K NASA Blue Marble) ─────────────────────────────
   const texLoader = new THREE.TextureLoader();
   texLoader.crossOrigin = '';
-
   const earthDay = texLoader.load('assets/earth_day.jpg');
   earthDay.anisotropy = renderer.capabilities.getMaxAnisotropy();
-
   const earthBump = texLoader.load('assets/earth_bump.jpg');
-
   const earthSpec = texLoader.load('assets/earth_specular.png');
 
-  // ── Globe: real Earth, OPAQUE (not translucent) ─────────────────────────────
+  // ── Globe: REAL Earth, OPAQUE ─────────────────────────────────────────────
   const globeGeo = new THREE.SphereGeometry(R, 128, 128);
   globe = new THREE.Mesh(globeGeo, new THREE.MeshPhongMaterial({
-    map: earthDay,
-    bumpMap: earthBump,
-    bumpScale: 0.8,
-    specularMap: earthSpec,
-    specular: new THREE.Color(0x4488bb),
-    shininess: 30,
-    transparent: false,    // OPAQUE — no translucency, looks like real Earth
-    side: THREE.FrontSide,
+    map: earthDay, bumpMap: earthBump, bumpScale: 0.8,
+    specularMap: earthSpec, specular: new THREE.Color(0x4488bb),
+    shininess: 30, transparent: false, side: THREE.FrontSide,
   }));
   scene.add(globe);
 
-  // ── Cloud layer (real clouds, above surface) ───────────────────────────────
+  // Cloud layer
   const cloudTex = texLoader.load('assets/clouds.png');
-  const cloudGeo = new THREE.SphereGeometry(R * 1.01, 64, 64);
-  const cloudMesh = new THREE.Mesh(cloudGeo, new THREE.MeshPhongMaterial({
-    map: cloudTex,
-    transparent: true,
-    opacity: 0.25,
-    depthWrite: false,
+  const cloudGeo = new THREE.SphereGeometry(R * 1.008, 64, 64);
+  scene.add(new THREE.Mesh(cloudGeo, new THREE.MeshPhongMaterial({
+    map: cloudTex, transparent: true, opacity: 0.2, depthWrite: false,
     blending: THREE.NormalBlending,
-  }));
-  scene.add(cloudMesh);
+  })));
 
-  // ── Atmosphere glow (rim light around the globe) ───────────────────────────
-  // Custom shader for a real atmospheric scattering effect
+  // Atmosphere glow
   const atmGeo = new THREE.SphereGeometry(R * 1.12, 64, 64);
-  const atmMat = new THREE.ShaderMaterial({
+  scene.add(new THREE.Mesh(atmGeo, new THREE.ShaderMaterial({
     uniforms: { c: { value: new THREE.Color(0x4080c0) }, p: { value: 4.0 } },
-    vertexShader: `
-      varying vec3 vNormal;
-      void main() {
-        vNormal = normalize(normalMatrix * normal);
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 c;
-      uniform float p;
-      varying vec3 vNormal;
-      void main() {
-        float intensity = pow(0.6 - dot(vNormal, vec3(0.0, 0.0, 1.0)), p);
-        gl_FragColor = vec4(c, 1.0) * intensity;
-      }
-    `,
-    side: THREE.BackSide,
-    blending: THREE.AdditiveBlending,
-    transparent: true,
-    depthWrite: false,
+    vertexShader: `varying vec3 vNormal; void main() { vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `uniform vec3 c; uniform float p; varying vec3 vNormal; void main() { float i = pow(0.6 - dot(vNormal, vec3(0.0, 0.0, 1.0)), p); gl_FragColor = vec4(c, 1.0) * i; }`,
+    side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+  })));
+
+  // ── Country border lines ──────────────────────────────────────────────────
+  fetch('data/borders.json').then(r => r.json()).then(borders => {
+    const bm = new THREE.LineBasicMaterial({ color: 0x5a7a9a, transparent: true, opacity: 0.35, depthWrite: false });
+    borders.forEach(bl => {
+      const pts = bl.map(([lat, lon]) => latLonToVec3(lat, lon, R * 1.002));
+      if (pts.length > 1) scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), bm));
+    });
   });
-  scene.add(new THREE.Mesh(atmGeo, atmMat));
 
-  // ── Country border lines (political boundaries) ─────────────────────────────
-  // Loaded from data/borders.json (Natural Earth 110m countries)
-  fetch('data/borders.json')
-    .then(r => r.json())
-    .then(borders => {
-      const borderMat = new THREE.LineBasicMaterial({
-        color: 0x4a6a8a, transparent: true, opacity: 0.4, depthWrite: false,
-      });
-      borders.forEach(borderLine => {
-        const pts = borderLine.map(([lat, lon]) => latLonToVec3(lat, lon, R * 1.003));
-        if (pts.length > 1) {
-          const geo = new THREE.BufferGeometry().setFromPoints(pts);
-          scene.add(new THREE.Line(geo, borderMat));
-        }
-      });
-      console.log(`Loaded ${borders.length} country border lines`);
-    })
-    .catch(e => console.log('Borders load error:', e));
-
-  // ── Satellites orbiting the Earth ──────────────────────────────────────────
+  // ── Satellites (real names, 3D orbits) ────────────────────────────────────
   const satGroup = new THREE.Group();
-  const satCount = 15;
-  for (let i = 0; i < satCount; i++) {
-    const orbitRadius = R * (1.2 + Math.random() * 0.5);
-    // Random 3D orbit orientation (not flat)
-    const inclX = (Math.random() - 0.5) * Math.PI;
-    const inclZ = (Math.random() - 0.5) * Math.PI;
-    const phase = Math.random() * Math.PI * 2;
-    const speed = 0.003 + Math.random() * 0.005;
-
-    // Satellite = small bright dot with trail
-    const satGeo = new THREE.BufferGeometry();
-    const satPos = new Float32Array(3);
-    satGeo.setAttribute('position', new THREE.BufferAttribute(satPos, 3));
-
-    const satMat = new THREE.PointsMaterial({
-      color: 0x00d4ff, size: 4, sizeAttenuation: true,
-      transparent: true, opacity: 1.0,
-      map: ledTexture(), alphaTest: 0.01,
-      blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
-    });
-    const sat = new THREE.Points(satGeo, satMat);
-    sat.userData = { orbitRadius, inclX, inclZ, phase, speed };
-    satGroup.add(sat);
-
-    // Orbit trail (visible ring)
+  const ledTex = ledTexture();
+  SAT_DATA.forEach(sat => {
+    const orbitR = R * sat.alt;
+    // Orbit ring (visible)
     const trailPts = [];
-    for (let a = 0; a < Math.PI * 2; a += 0.04) {
-      let x = orbitRadius * Math.cos(a);
-      let z = orbitRadius * Math.sin(a);
-      let y = 0;
-      // Apply inclinations
-      const y1 = y * Math.cos(inclX) - z * Math.sin(inclX);
-      const z1 = y * Math.sin(inclX) + z * Math.cos(inclX);
-      const x2 = x * Math.cos(inclZ) + y1 * Math.sin(inclZ);
-      const y2 = -x * Math.sin(inclZ) + y1 * Math.cos(inclZ);
-      trailPts.push(new THREE.Vector3(x2, y2, z1));
+    for (let a = 0; a < Math.PI * 2; a += 0.03) {
+      let x = orbitR * Math.cos(a), z = orbitR * Math.sin(a), y = 0;
+      const y1 = y * Math.cos(sat.incl) - z * Math.sin(sat.incl);
+      const z1 = y * Math.sin(sat.incl) + z * Math.cos(sat.incl);
+      trailPts.push(new THREE.Vector3(x, y1, z1));
     }
-    const trailGeo = new THREE.BufferGeometry().setFromPoints(trailPts);
-    const trailMat = new THREE.LineBasicMaterial({
-      color: 0x4080b0, transparent: true, opacity: 0.15, depthWrite: false,
+    satGroup.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(trailPts),
+      new THREE.LineBasicMaterial({ color: sat.color, transparent: true, opacity: 0.2, depthWrite: false })
+    ));
+
+    // Satellite point (BRIGHT, always visible)
+    const sg = new THREE.BufferGeometry();
+    sg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3), 3));
+    const pm = new THREE.PointsMaterial({
+      color: sat.color, size: 5, sizeAttenuation: true,
+      transparent: true, opacity: 1.0, map: ledTex,
+      alphaTest: 0.01, blending: THREE.AdditiveBlending,
+      depthWrite: false, depthTest: false,  // always visible (even behind globe)
     });
-    satGroup.add(new THREE.Line(trailGeo, trailMat));
-  }
+    const satPoint = new THREE.Points(sg, pm);
+    satPoint.userData = { orbitR, incl: sat.incl, phase: sat.phase, speed: sat.speed, name: sat.name };
+    satGroup.add(satPoint);
+  });
   scene.add(satGroup);
   scene.userData.satellites = satGroup;
 }
@@ -315,22 +262,18 @@ function loadAgents() {
       const kind = classifyAgent(a.name, a.description, a.namespace);
       const region = regionForAgent(a.name, a.namespace);
       return { ...a, kind, regionLabel: region.label, country: region.country || 'Global',
-               lat: region.lat, lon: region.lon,
-               position: latLonToVec3(region.lat, region.lon, PR) };
+               lat: region.lat, lon: region.lon, position: latLonToVec3(region.lat, region.lon, PR) };
     });
-
     const total = agents.length;
     const x402 = agents.filter(a => a.x402).length;
     const barter = agents.filter(a => a.barter).length;
     const cards = agents.filter(a => a.agent_card).length;
     const countries = new Set(agents.map(a => a.country));
-
     document.getElementById('stat-total').textContent = total.toLocaleString();
     document.getElementById('stat-x402').textContent = x402;
     document.getElementById('stat-barter').textContent = barter;
     document.getElementById('stat-cards').textContent = cards;
     document.getElementById('stat-regions').textContent = countries.size;
-
     ['firewall','payment','compute','directory','publisher','bridge','observer'].forEach(k => {
       const c = agents.filter(a => a.kind === k).length;
       const el = document.querySelector(`[data-filter="${k}"] .count`);
@@ -338,169 +281,96 @@ function loadAgents() {
     });
     document.querySelector('[data-filter="x402"] .count').textContent = x402;
     document.querySelector('[data-filter="barter"] .count').textContent = barter;
-
-    // Populate country filter
     const countrySet = new Set(agents.map(a => a.country).filter(c => c && c !== 'Global'));
     const sortedCountries = [...countrySet].sort();
-    const countrySelect = document.getElementById('country-filter');
-    if (countrySelect) {
-      sortedCountries.forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c; opt.textContent = c;
-        countrySelect.appendChild(opt);
-      });
-    }
-
-    document.getElementById('footer-text').textContent =
-      `${total} agents · ${data.total_versions} versions · ${countries.size} countries · ${data.scan_time} · registry.modelcontextprotocol.io`;
-
+    const cs = document.getElementById('country-filter');
+    if (cs) sortedCountries.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; cs.appendChild(o); });
+    document.getElementById('footer-text').textContent = `${total} agents · ${data.total_versions} versions · ${countries.size} countries · ${data.scan_time} · registry.modelcontextprotocol.io`;
     document.getElementById('loader').classList.add('hidden');
     applyFilter('all');
   });
 }
 
-// ─── Filtering ────────────────────────────────────────────────────────────────
 function applyFilter(filter) {
   activeFilter = filter;
   document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.filter === filter));
   const search = document.getElementById('search').value.toLowerCase();
   const countryFilter = document.getElementById('country-filter')?.value || '';
-
   if (filter === 'all') filteredAgents = agents;
   else if (filter === 'x402') filteredAgents = agents.filter(a => a.x402);
   else if (filter === 'barter') filteredAgents = agents.filter(a => a.barter);
   else filteredAgents = agents.filter(a => a.kind === filter);
-
-  if (search) {
-    filteredAgents = filteredAgents.filter(a =>
-      a.name.toLowerCase().includes(search) || a.description.toLowerCase().includes(search) ||
-      a.namespace.toLowerCase().includes(search) || a.regionLabel.toLowerCase().includes(search));
-  }
-  if (countryFilter) {
-    filteredAgents = filteredAgents.filter(a => a.country === countryFilter);
-  }
-
-  renderPoints();
-  renderConnections();
+  if (search) filteredAgents = filteredAgents.filter(a =>
+    a.name.toLowerCase().includes(search) || a.description.toLowerCase().includes(search) ||
+    a.namespace.toLowerCase().includes(search) || a.regionLabel.toLowerCase().includes(search));
+  if (countryFilter) filteredAgents = filteredAgents.filter(a => a.country === countryFilter);
+  renderPoints(); renderConnections();
   document.getElementById('stat-total').textContent = filteredAgents.length.toLocaleString();
   updateStatsPanel();
 }
 
-// ─── Point rendering (bright sharp LED dots, not dim 80s pixels) ──────────────
-function ledTexture() {
-  const c = document.createElement('canvas');
-  c.width = 128; c.height = 128;
-  const ctx = c.getContext('2d');
-  // Sharp bright dot: white-hot center + tight glow
-  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 24);
-  g.addColorStop(0, 'rgba(255,255,255,1)');       // white-hot center
-  g.addColorStop(0.25, 'rgba(255,255,255,0.9)');  // bright core
-  g.addColorStop(0.5, 'rgba(255,255,255,0.5)');   // glow
-  g.addColorStop(0.75, 'rgba(255,255,255,0.1)');  // dim halo
-  g.addColorStop(1, 'rgba(255,255,255,0)');         // nothing
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 128, 128);
-  return new THREE.CanvasTexture(c);
-}
-
+// ─── Point rendering — NORMAL blending + depthWrite=true = NO see-through ────
 let pointTex;
 function renderPoints() {
   if (pointsObj) { scene.remove(pointsObj); pointsObj.geometry.dispose(); pointsObj.material.dispose(); }
   if (!filteredAgents.length) return;
-
   const N = filteredAgents.length;
-  const pos = new Float32Array(N * 3);
-  const col = new Float32Array(N * 3);
-  const siz = new Float32Array(N);
-
+  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
     const a = filteredAgents[i];
     pos[i*3] = a.position.x; pos[i*3+1] = a.position.y; pos[i*3+2] = a.position.z;
     const c = new THREE.Color(KIND_COLORS[a.kind] || 0xffffff);
-    if (a.x402) c.multiplyScalar(2.0);
-    if (a.barter) c.multiplyScalar(2.5);
+    if (a.x402) c.multiplyScalar(1.8);
+    if (a.barter) c.multiplyScalar(2.2);
     col[i*3] = Math.min(c.r, 1); col[i*3+1] = Math.min(c.g, 1); col[i*3+2] = Math.min(c.b, 1);
-    // Size: base + version_count influence + x402/barter boost
-    let s = 1.5 + Math.log2((a.versions?.length || 1) + 1) * 0.3;
-    if (a.x402) s += 1.5;
-    if (a.barter) s += 2.5;
-    siz[i] = s;
   }
-
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-
   if (!pointTex) pointTex = ledTexture();
   const mat = new THREE.PointsMaterial({
-    size: 3.5,           // bigger = more visible LED dots
-    sizeAttenuation: true,
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.95,
-    map: pointTex,
+    size: 3, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.9, map: pointTex,
     alphaTest: 0.01,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    depthTest: true,      // respect depth — points behind the globe are HIDDEN (no see-through)
+    blending: THREE.NormalBlending,  // NOT additive — additive ignores depth
+    depthWrite: true,   // write depth so globe can occlude points behind it
+    depthTest: true,    // test against globe depth — points behind globe are HIDDEN
   });
-
   pointsObj = new THREE.Points(geo, mat);
   pointsObj.userData.agents = filteredAgents;
   scene.add(pointsObj);
 }
 
-// ─── Connection arcs between agents ──────────────────────────────────────────
+// ─── Connection arcs ──────────────────────────────────────────────────────────
 function renderConnections() {
-  // Remove old connections
   connectionLines.forEach(l => { scene.remove(l); l.geometry.dispose(); l.material.dispose(); });
   connectionLines = [];
-
-  // Draw connections from x402 agents to barter agents, and from firewall to payment
-  const x402Agents = filteredAgents.filter(a => a.x402);
-  const barterAgents = filteredAgents.filter(a => a.barter);
-  const firewallAgents = filteredAgents.filter(a => a.kind === 'firewall');
-  const paymentAgents = filteredAgents.filter(a => a.kind === 'payment').slice(0, 20);
-
-  // x402 → barter connections
-  x402Agents.forEach(a => {
-    barterAgents.forEach(b => {
-      if (a.name === b.name) return;
-      const arc = createArc(a.position, b.position, 0x00d4ff, 0.4);
-      if (arc) { scene.add(arc); connectionLines.push(arc); }
-    });
-  });
-
-  // firewall → payment connections
-  firewallAgents.forEach(a => {
-    paymentAgents.forEach(b => {
-      if (a.name === b.name) return;
-      const arc = createArc(a.position, b.position, 0xff6b35, 0.3);
-      if (arc) { scene.add(arc); connectionLines.push(arc); }
-    });
-  });
+  const x402A = filteredAgents.filter(a => a.x402);
+  const barterA = filteredAgents.filter(a => a.barter);
+  const fwA = filteredAgents.filter(a => a.kind === 'firewall');
+  const payA = filteredAgents.filter(a => a.kind === 'payment').slice(0, 20);
+  x402A.forEach(a => barterA.forEach(b => { if (a.name !== b.name) { const ar = createArc(a.position, b.position, 0x00d4ff, 0.4); if (ar) { scene.add(ar); connectionLines.push(ar); } } }));
+  fwA.forEach(a => payA.forEach(b => { if (a.name !== b.name) { const ar = createArc(a.position, b.position, 0xff6b35, 0.3); if (ar) { scene.add(ar); connectionLines.push(ar); } } }));
 }
-
 function createArc(p1, p2, color, opacity) {
   if (!p1 || !p2) return null;
   const mid = new THREE.Vector3().lerpVectors(p1, p2, 0.5);
-  mid.normalize().multiplyScalar(PR * 1.3); // arc above the surface
+  mid.normalize().multiplyScalar(PR * 1.3);
   const curve = new THREE.QuadraticBezierCurve3(p1, mid, p2);
-  const points = curve.getPoints(30);
-  const geo = new THREE.BufferGeometry().setFromPoints(points);
-  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
-  return new THREE.Line(geo, mat);
+  const pts = curve.getPoints(30);
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  return new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
 }
 
 // ─── Interaction ─────────────────────────────────────────────────────────────
 let isDragging = false, prevX = 0, prevY = 0;
-let rotY = 0, rotX = 0, velY = 0.0005, velX = 0;
+let rotY = 0, rotX = 0, velY = 0.001, velX = 0;
 let camDist = 280, camDistTarget = 280;
-let mouseOnGlobe = false, mouseSX = 0, mouseSY = 0;
+let mouseSX = 0, mouseSY = 0;
 
 function onPointerDown(e) { isDragging = true; prevX = e.clientX; prevY = e.clientY; }
 function onPointerMove(e) {
-  mouseSX = e.clientX; mouseSY = e.clientY; mouseOnGlobe = true;
+  mouseSX = e.clientX; mouseSY = e.clientY;
   if (isDragging) {
     velY = (e.clientX - prevX) * 0.006; velX = (e.clientY - prevY) * 0.006;
     rotY += velY; rotX += velX;
@@ -513,14 +383,13 @@ function onPointerMove(e) {
     checkHover();
   }
 }
-function onPointerLeave() { isDragging = false; mouseOnGlobe = false; }
 function onPointerUp() { isDragging = false; }
+function onPointerLeave() { isDragging = false; }
 function onWheel(e) {
   camDistTarget *= 1 + (e.deltaY > 0 ? 0.12 : -0.12);
   camDistTarget = Math.max(110, Math.min(600, camDistTarget));
   e.preventDefault();
 }
-
 function checkHover() {
   if (!pointsObj) return;
   raycaster.setFromCamera(mouse, camera);
@@ -532,43 +401,30 @@ function checkHover() {
     tt.innerHTML = `<div class="t-name">${a.name}</div><div class="t-meta">${a.regionLabel} · ${a.country} · ${a.kind}${a.x402?' · x402':''}${a.barter?' · barter':''}</div>`;
     tt.style.left = (mouseSX + 14) + 'px'; tt.style.top = (mouseSY + 14) + 'px';
     tt.classList.add('visible'); document.body.style.cursor = 'pointer';
-  } else {
-    hoveredIdx = -1; tt.classList.remove('visible'); document.body.style.cursor = 'default';
-  }
+  } else { hoveredIdx = -1; tt.classList.remove('visible'); document.body.style.cursor = 'default'; }
 }
-
 function onClick() { if (hoveredIdx >= 0) showPanel(filteredAgents[hoveredIdx]); }
 
-// ─── Agent detail panel ─────────────────────────────────────────────────────
+// ─── Agent panel ─────────────────────────────────────────────────────────────
 function showPanel(a) {
   const kc = {firewall:'#ff6b35',payment:'#00d4ff',compute:'#a78bfa',directory:'#fbbf24',publisher:'#22c55e',bridge:'#ec4899',observer:'#f43f5e',consumer:'#94a3b8'};
   const color = kc[a.kind];
   const caps = [];
-  if (a.x402) caps.push(`<span class="cap-tag" style="background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3)">💰 x402 Payments</span>`);
-  if (a.barter) caps.push(`<span class="cap-tag" style="background:rgba(255,107,53,0.1);color:#ff6b35;border:1px solid rgba(255,107,53,0.3)">🔁 Barter Accepted</span>`);
+  if (a.x402) caps.push(`<span class="cap-tag" style="background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3)">💰 x402</span>`);
+  if (a.barter) caps.push(`<span class="cap-tag" style="background:rgba(255,107,53,0.1);color:#ff6b35;border:1px solid rgba(255,107,53,0.3)">🔁 Barter</span>`);
   if (a.agent_card) caps.push(`<span class="cap-tag" style="background:rgba(167,139,250,0.1);color:#a78bfa;border:1px solid rgba(167,139,250,0.3)">🪪 Agent Card</span>`);
   caps.push(`<span class="cap-tag" style="background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.3)">📍 ${a.regionLabel}</span>`);
-
   const protocols = ['MCP']; if (a.x402) protocols.push('x402'); if (a.barter) protocols.push('Barter'); if (a.agent_card) protocols.push('A2A');
   const links = [];
   if (a.website) links.push(`<a class="link-item" href="${a.website}" target="_blank" rel="noopener">🌐 ${a.website}</a>`);
   if (a.repository) links.push(`<a class="link-item" href="${a.repository}" target="_blank" rel="noopener">📦 ${a.repository}</a>`);
   if (a.agent_card) links.push(`<a class="link-item" href="${a.agent_card}" target="_blank" rel="noopener">🪪 ${a.agent_card}</a>`);
-  links.push(`<a class="link-item" href="https://registry.modelcontextprotocol.io/v0/servers?cursor=${encodeURIComponent(a.namespace)}&limit=20" target="_blank" rel="noopener">🔍 View in MCP Registry</a>`);
-
-  // Connections: find related agents
+  links.push(`<a class="link-item" href="https://registry.modelcontextprotocol.io/v0/servers?cursor=${encodeURIComponent(a.namespace)}&limit=20" target="_blank" rel="noopener">🔍 MCP Registry</a>`);
   const nearby = agents.filter(x => x.name !== a.name).filter(x => {
-    if (a.x402 && x.barter) return true;
-    if (a.barter && x.x402) return true;
-    if (x.kind === a.kind && x.country === a.country) return true;
-    return false;
+    if (a.x402 && x.barter) return true; if (a.barter && x.x402) return true;
+    if (x.kind === a.kind && x.country === a.country) return true; return false;
   }).slice(0, 10);
-  const connectionsHTML = nearby.length ? `
-    <div style="margin-top:16px">
-      <h3 style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-dim);margin-bottom:8px">Connected Agents (${nearby.length})</h3>
-      ${nearby.map(x => `<div style="padding:6px 10px;margin-bottom:4px;background:rgba(255,255,255,0.03);border:1px solid rgba(100,130,180,0.15);border-radius:6px;font-size:11px;font-family:var(--mono);cursor:pointer;color:${kc[x.kind]||'#888'}" onclick="showPanelByName('${x.name.replace(/'/g,"\\'")}')">${x.name} <span style="float:right;opacity:0.5">${x.regionLabel}</span></div>`).join('')}
-    </div>` : '';
-
+  const connectionsHTML = nearby.length ? `<div style="margin-top:16px"><h3 style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-dim);margin-bottom:8px">Connected Agents (${nearby.length})</h3>${nearby.map(x => `<div style="padding:6px 10px;margin-bottom:4px;background:rgba(255,255,255,0.03);border:1px solid rgba(100,130,180,0.15);border-radius:6px;font-size:11px;font-family:var(--mono);cursor:pointer;color:${kc[x.kind]||'#888'}" onclick="showPanelByName('${x.name.replace(/'/g,"\\'")}')">${x.name} <span style="float:right;opacity:0.5">${x.regionLabel}</span></div>`).join('')}</div>` : '';
   document.getElementById('panel-content').innerHTML = `
     <div class="kind-badge" style="background:${color};color:#000">${KIND_LABELS[a.kind] || a.kind}</div>
     <div class="agent-title">${a.name}</div>
@@ -597,55 +453,28 @@ window.showPanelByName = function(name) { const a = agents.find(x => x.name === 
 window.flyToAgentByName = function(name) { const a = agents.find(x => x.name === name); if (a) flyToAgent(a); };
 function closePanel() { document.getElementById('panel-right').classList.remove('open'); }
 
-// ─── Zoom to agent (Idea 1: click agent in panel → camera flies to it) ──────
 let zoomTarget = null;
 function flyToAgent(agent) {
   if (!agent.position) return;
-  // Compute target rotation so the agent faces the camera
   const pos = agent.position.clone();
-  // Undo current rotation to get the "world" position
   pos.applyAxisAngle(new THREE.Vector3(1, 0, 0), -rotX);
   pos.applyAxisAngle(new THREE.Vector3(0, 1, 0), -rotY);
-  // Calculate the rotation needed to bring this point to the front
   const targetRotY = Math.atan2(pos.x, pos.z);
   const targetRotX = Math.atan2(pos.y, Math.sqrt(pos.x * pos.x + pos.z * pos.z));
-  // Smoothly animate to this rotation
   zoomTarget = { rotY: -targetRotY, rotX: -targetRotX, dist: 140 };
 }
 
-// ─── Stats panel (Idea 3: real-time stats that update on filter) ────────────
 function updateStatsPanel() {
   const total = filteredAgents.length;
-  const byKind = {};
-  filteredAgents.forEach(a => { byKind[a.kind] = (byKind[a.kind] || 0) + 1; });
-  const byCountry = {};
-  filteredAgents.forEach(a => { byCountry[a.country] = (byCountry[a.country] || 0) + 1; });
-  const topCountries = Object.entries(byCountry).sort((a, b) => b[1] - a[1]).slice(0, 8);
-
-  let html = `<div style="margin-bottom:12px;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px">`;
-  html += `<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">SHOWING ${total.toLocaleString()} AGENTS</div>`;
-  html += `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">`;
-  for (const [k, v] of Object.entries(byKind).sort((a, b) => b[1] - a[1])) {
-    const color = '#' + KIND_COLORS[k].toString(16).padStart(6, '0');
-    html += `<span style="font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px;background:${color}22;color:${color}">${k}: ${v}</span>`;
-  }
-  html += `</div>`;
-  if (topCountries.length > 1) {
-    html += `<div style="font-size:9px;color:var(--text-dim);margin-bottom:3px">TOP COUNTRIES</div>`;
-    for (const [c, n] of topCountries) {
-      const pct = (n / total * 100).toFixed(0);
-      html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">`;
-      html += `<span style="font-size:10px;min-width:80px">${c}</span>`;
-      html += `<div style="flex:1;height:4px;background:rgba(255,255,255,0.05);border-radius:2px;overflow:hidden">`;
-      html += `<div style="width:${pct}%;height:100%;background:var(--accent-orange);border-radius:2px"></div>`;
-      html += `</div>`;
-      html += `<span style="font-size:9px;font-family:var(--mono);min-width:30px;text-align:right">${n}</span>`;
-      html += `</div>`;
-    }
-  }
-  html += `</div>`;
-  const statsEl = document.getElementById('stats-panel');
-  if (statsEl) statsEl.innerHTML = html;
+  const byKind = {}, byCountry = {};
+  filteredAgents.forEach(a => { byKind[a.kind] = (byKind[a.kind] || 0) + 1; byCountry[a.country] = (byCountry[a.country] || 0) + 1; });
+  const tc = Object.entries(byCountry).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  let h = `<div style="margin-bottom:12px;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px"><div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">SHOWING ${total.toLocaleString()} AGENTS</div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">`;
+  for (const [k, v] of Object.entries(byKind).sort((a, b) => b[1] - a[1])) { const c = '#' + KIND_COLORS[k].toString(16).padStart(6, '0'); h += `<span style="font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px;background:${c}22;color:${c}">${k}: ${v}</span>`; }
+  h += `</div>`;
+  if (tc.length > 1) { h += `<div style="font-size:9px;color:var(--text-dim);margin-bottom:3px">TOP COUNTRIES</div>`; for (const [c, n] of tc) { const p = (n / total * 100).toFixed(0); h += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px"><span style="font-size:10px;min-width:80px">${c}</span><div style="flex:1;height:4px;background:rgba(255,255,255,0.05);border-radius:2px;overflow:hidden"><div style="width:${p}%;height:100%;background:#ff6b35;border-radius:2px"></div></div><span style="font-size:9px;font-family:var(--mono);min-width:30px;text-align:right">${n}</span></div>`; } }
+  h += `</div>`;
+  const el = document.getElementById('stats-panel'); if (el) el.innerHTML = h;
 }
 
 // ─── Animation ──────────────────────────────────────────────────────────────
@@ -653,74 +482,43 @@ let pulseT = 0;
 function animate() {
   requestAnimationFrame(animate);
   pulseT += 0.02;
-
-  // Zoom-to-agent animation
   if (zoomTarget) {
-    rotY += (zoomTarget.rotY - rotY) * 0.06;
-    rotX += (zoomTarget.rotX - rotX) * 0.06;
+    rotY += (zoomTarget.rotY - rotY) * 0.06; rotX += (zoomTarget.rotX - rotX) * 0.06;
     camDistTarget += (zoomTarget.dist - camDistTarget) * 0.06;
-    if (Math.abs(zoomTarget.rotY - rotY) < 0.01 && Math.abs(zoomTarget.dist - camDistTarget) < 1) {
-      zoomTarget = null;
-    }
+    if (Math.abs(zoomTarget.rotY - rotY) < 0.01 && Math.abs(zoomTarget.dist - camDistTarget) < 1) zoomTarget = null;
   }
-
   if (!isDragging && !zoomTarget) {
-    if (!isPaused && !mouseOnGlobe) {
+    if (!isPaused) {
       rotY += velY; rotX += velX;
-      velY = velY * 0.96 + 0.0005; velX *= 0.96;
+      velY = velY * 0.96 + 0.001; velX *= 0.96;
     } else { velY *= 0.9; velX *= 0.9; }
   }
-
   camDist += (camDistTarget - camDist) * 0.1;
-
   scene.children.forEach(obj => {
-    if (obj === pointsObj || obj === globe || obj instanceof THREE.Line || obj instanceof THREE.Points || obj instanceof THREE.Mesh) {
-      obj.rotation.y = rotY; obj.rotation.x = rotX;
-    }
+    if (obj === pointsObj || obj === globe || obj instanceof THREE.Line || obj instanceof THREE.Points || obj instanceof THREE.Mesh) { obj.rotation.y = rotY; obj.rotation.x = rotX; }
   });
-
-  // Pulse the connection lines
-  connectionLines.forEach((l, i) => {
-    if (l.material) l.material.opacity = 0.2 + Math.sin(pulseT + i * 0.5) * 0.15;
-  });
-
-  // Pulse the LED points (breathing effect)
-  if (pointsObj && pointsObj.material) {
-    pointsObj.material.size = 3.5 + Math.sin(pulseT) * 0.3;
-  }
-
+  connectionLines.forEach((l, i) => { if (l.material) l.material.opacity = 0.2 + Math.sin(pulseT + i * 0.5) * 0.15; });
+  if (pointsObj && pointsObj.material) { pointsObj.material.size = 3 + Math.sin(pulseT) * 0.2; }
   // Animate satellites
-  const satGroup = scene.userData.satellites;
-  if (satGroup) {
-    satGroup.children.forEach(child => {
-      if (child instanceof THREE.Points && child.userData.orbitRadius) {
-        const ud = child.userData;
-        ud.phase += ud.speed;
-        // 3D orbit: start in XZ plane, then apply two inclinations
-        let x = ud.orbitRadius * Math.cos(ud.phase);
-        let z = ud.orbitRadius * Math.sin(ud.phase);
-        let y = 0;
-        const y1 = y * Math.cos(ud.inclX) - z * Math.sin(ud.inclX);
-        const z1 = y * Math.sin(ud.inclX) + z * Math.cos(ud.inclX);
-        const x2 = x * Math.cos(ud.inclZ) + y1 * Math.sin(ud.inclZ);
-        const y2 = -x * Math.sin(ud.inclZ) + y1 * Math.cos(ud.inclZ);
-        child.position.set(x2, y2, z1);
+  const sg = scene.userData.satellites;
+  if (sg) {
+    sg.children.forEach(child => {
+      if (child instanceof THREE.Points && child.userData.orbitR) {
+        const u = child.userData; u.phase += u.speed;
+        let x = u.orbitR * Math.cos(u.phase), z = u.orbitR * Math.sin(u.phase), y = 0;
+        const y1 = y * Math.cos(u.incl) - z * Math.sin(u.incl);
+        const z1 = y * Math.sin(u.incl) + z * Math.cos(u.incl);
+        child.position.set(x, y1, z1);
       }
     });
-    // Rotate satellite group with the globe
-    satGroup.rotation.y = rotY;
-    satGroup.rotation.x = rotX;
+    sg.rotation.y = rotY; sg.rotation.x = rotX;
   }
-
   camera.position.z = camDist;
   renderer.render(scene, camera);
 }
 
 // ─── Init ───────────────────────────────────────────────────────────────────
-window.addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
-});
-
+window.addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 window.addEventListener('load', () => {
   initGlobe(); animate();
   const canvas = document.getElementById('globe-canvas');
@@ -735,9 +533,6 @@ window.addEventListener('load', () => {
   document.getElementById('country-filter')?.addEventListener('change', () => applyFilter(activeFilter));
   document.getElementById('panel-close').addEventListener('click', closePanel);
   document.getElementById('toggle-sidebar').addEventListener('click', () => document.getElementById('sidebar-left').classList.toggle('collapsed'));
-  document.getElementById('btn-pause').addEventListener('click', () => {
-    isPaused = !isPaused;
-    document.getElementById('btn-pause').textContent = isPaused ? '▶ Play' : '⏸ Pause';
-  });
+  document.getElementById('btn-pause').addEventListener('click', () => { isPaused = !isPaused; document.getElementById('btn-pause').textContent = isPaused ? '▶ Play' : '⏸ Pause'; });
   loadAgents();
 });
