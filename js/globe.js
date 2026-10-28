@@ -528,11 +528,14 @@ window.addEventListener('load', () => {
   canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('click', onClick);
-  document.querySelectorAll('.filter-btn').forEach(btn => btn.addEventListener('click', () => applyFilter(btn.dataset.filter)));
+  document.querySelectorAll('.filter-btn').forEach(btn => btn.addEventListener('click', () => { applyFilter(btn.dataset.filter); if (window.innerWidth <= 768) document.getElementById('sidebar-left').classList.add('collapsed'); }));
   document.getElementById('search').addEventListener('input', () => applyFilter(activeFilter));
   document.getElementById('country-filter')?.addEventListener('change', () => applyFilter(activeFilter));
   document.getElementById('panel-close').addEventListener('click', closePanel);
   document.getElementById('toggle-sidebar').addEventListener('click', () => document.getElementById('sidebar-left').classList.toggle('collapsed'));
+  document.getElementById('mobile-menu-btn').addEventListener('click', () => document.getElementById('sidebar-left').classList.toggle('collapsed'));
+  // Auto-collapse sidebar on mobile + on point click
+  if (window.innerWidth <= 768) document.getElementById('sidebar-left').classList.add('collapsed');
   document.getElementById('btn-pause').addEventListener('click', () => { isPaused = !isPaused; document.getElementById('btn-pause').textContent = isPaused ? '▶ Play' : '⏸ Pause'; });
   loadAgents();
 });
