@@ -364,7 +364,7 @@ function createArc(p1, p2, color, opacity) {
 
 // ─── Interaction ─────────────────────────────────────────────────────────────
 let isDragging = false, prevX = 0, prevY = 0;
-let rotY = 0, rotX = 0, velY = 0.001, velX = 0;
+let rotY = 0, rotX = 0, velY = 0.0003, velX = 0;
 let camDist = 280, camDistTarget = 280;
 let mouseSX = 0, mouseSY = 0;
 
@@ -403,7 +403,7 @@ function checkHover() {
     tt.classList.add('visible'); document.body.style.cursor = 'pointer';
   } else { hoveredIdx = -1; tt.classList.remove('visible'); document.body.style.cursor = 'default'; }
 }
-function onClick() { if (hoveredIdx >= 0) showPanel(filteredAgents[hoveredIdx]); }
+function onClick() { if (hoveredIdx >= 0) { showPanel(filteredAgents[hoveredIdx]); } else { isPaused = !isPaused; document.getElementById('btn-pause').textContent = isPaused ? '▶ Play' : '⏸ Pause'; } }
 
 // ─── Agent panel ─────────────────────────────────────────────────────────────
 function showPanel(a) {
@@ -490,7 +490,7 @@ function animate() {
   if (!isDragging && !zoomTarget) {
     if (!isPaused) {
       rotY += velY; rotX += velX;
-      velY = velY * 0.96 + 0.001; velX *= 0.96;
+      velY = velY * 0.96 + 0.0003; velX *= 0.96;
     } else { velY *= 0.9; velX *= 0.9; }
   }
   camDist += (camDistTarget - camDist) * 0.1;
