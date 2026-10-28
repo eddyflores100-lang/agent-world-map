@@ -175,49 +175,71 @@ function initGlobe() {
   sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
   scene.add(new THREE.Points(sg, new THREE.PointsMaterial({color:0xffffff,size:0.8,transparent:true,opacity:0.5,sizeAttenuation:true,depthWrite:false})));
 
-  // Earth texture — REAL NASA Blue Marble satellite imagery
+  // ── REAL Earth textures (4K NASA Blue Marble) ─────────────────────────────
   const texLoader = new THREE.TextureLoader();
   texLoader.crossOrigin = '';
 
   const earthDay = texLoader.load('assets/earth_day.jpg');
-  const earthSpecular = texLoader.load('assets/earth_specular.jpg');
-  const earthBump = texLoader.load('assets/earth_normal.jpg');
+  earthDay.anisotropy = renderer.capabilities.getMaxAnisotropy();
 
-  // Globe with REAL Earth texture — translucent so agent points are visible through it
-  const globeGeo = new THREE.SphereGeometry(R, 64, 64);
+  const earthBump = texLoader.load('assets/earth_bump.jpg');
+
+  const earthSpec = texLoader.load('assets/earth_specular.png');
+
+  // ── Globe: real Earth, translucent ─────────────────────────────────────────
+  const globeGeo = new THREE.SphereGeometry(R, 128, 128);  // more segments for smoother sphere
   globe = new THREE.Mesh(globeGeo, new THREE.MeshPhongMaterial({
-    map: earthDay,           // real satellite image
-    specularMap: earthSpecular, // ocean reflection map
-    normalMap: earthBump,     // terrain bump map
-    specular: new THREE.Color(0x336699),
-    shininess: 25,
+    map: earthDay,
+    bumpMap: earthBump,
+    bumpScale: 0.8,
+    specularMap: earthSpec,
+    specular: new THREE.Color(0x4488bb),
+    shininess: 30,
     transparent: true,
-    opacity: 0.80,            // translucent — can see through the globe
+    opacity: 0.78,   // translucent — you can see agent points through the globe
     side: THREE.FrontSide,
   }));
   scene.add(globe);
 
-  // Inner glow (soft blue from inside the globe)
-  const innerGlowGeo = new THREE.SphereGeometry(R * 0.97, 32, 32);
-  scene.add(new THREE.Mesh(innerGlowGeo, new THREE.MeshBasicMaterial({
-    color: 0x0a3060, transparent: true, opacity: 0.12, side: THREE.BackSide,
-  })));
-
-  // Real cloud layer
-  const cloudTex = texLoader.load('assets/earth_night.jpg');
-  const cloudGeo = new THREE.SphereGeometry(R * 1.012, 64, 64);
+  // ── Cloud layer (real clouds, above surface) ───────────────────────────────
+  const cloudTex = texLoader.load('assets/clouds.png');
+  const cloudGeo = new THREE.SphereGeometry(R * 1.01, 64, 64);
   const cloudMesh = new THREE.Mesh(cloudGeo, new THREE.MeshPhongMaterial({
-    map: cloudTex, transparent: true, opacity: 0.15, depthWrite: false,
-    blending: THREE.AdditiveBlending,
+    map: cloudTex,
+    transparent: true,
+    opacity: 0.25,
+    depthWrite: false,
+    blending: THREE.NormalBlending,
   }));
   scene.add(cloudMesh);
 
-  // Atmosphere rim glow (larger, softer)
-  const atmGeo = new THREE.SphereGeometry(R * 1.08, 64, 64);
-  scene.add(new THREE.Mesh(atmGeo, new THREE.MeshPhongMaterial({
-    color: 0x4080b0, transparent: true, opacity: 0.05, side: THREE.BackSide,
-    shininess: 100, specular: 0x60a0d0,
-  })));
+  // ── Atmosphere glow (rim light around the globe) ───────────────────────────
+  // Custom shader for a real atmospheric scattering effect
+  const atmGeo = new THREE.SphereGeometry(R * 1.12, 64, 64);
+  const atmMat = new THREE.ShaderMaterial({
+    uniforms: { c: { value: new THREE.Color(0x4080c0) }, p: { value: 4.0 } },
+    vertexShader: `
+      varying vec3 vNormal;
+      void main() {
+        vNormal = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 c;
+      uniform float p;
+      varying vec3 vNormal;
+      void main() {
+        float intensity = pow(0.6 - dot(vNormal, vec3(0.0, 0.0, 1.0)), p);
+        gl_FragColor = vec4(c, 1.0) * intensity;
+      }
+    `,
+    side: THREE.BackSide,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    depthWrite: false,
+  });
+  scene.add(new THREE.Mesh(atmGeo, atmMat));
 }
 
 // ─── Data loading ────────────────────────────────────────────────────────────
@@ -295,19 +317,29 @@ function applyFilter(filter) {
   renderPoints();
   renderConnections();
   document.getElementById('stat-total').textContent = filteredAgents.length.toLocaleString();
+  updateStatsPanel();
 }
 
-// ─── Point rendering (glowing sprites) ───────────────────────────────────────
-function pointTexture() {
+// ─── Point rendering (LED-style glowing sprites) ─────────────────────────────
+function ledTexture() {
   const c = document.createElement('canvas');
-  c.width = 64; c.height = 64;
+  c.width = 128; c.height = 128;
   const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.2, 'rgba(255,255,255,0.9)');
-  g.addColorStop(0.5, 'rgba(255,255,255,0.3)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
+  // LED dot: bright center + soft glow halo + sharp edge
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');       // hot center
+  g.addColorStop(0.15, 'rgba(255,255,255,0.95)');  // bright core
+  g.addColorStop(0.3, 'rgba(255,255,255,0.6)');   // inner glow
+  g.addColorStop(0.55, 'rgba(255,255,255,0.2)');   // mid glow
+  g.addColorStop(0.8, 'rgba(255,255,255,0.05)');   // outer halo
+  g.addColorStop(1, 'rgba(255,255,255,0)');        // fade to nothing
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  // Add a bright ring for the "LED" look
+  ctx.beginPath();
+  ctx.arc(64, 64, 18, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fill();
   return new THREE.CanvasTexture(c);
 }
 
@@ -319,6 +351,7 @@ function renderPoints() {
   const N = filteredAgents.length;
   const pos = new Float32Array(N * 3);
   const col = new Float32Array(N * 3);
+  const siz = new Float32Array(N);
 
   for (let i = 0; i < N; i++) {
     const a = filteredAgents[i];
@@ -327,17 +360,29 @@ function renderPoints() {
     if (a.x402) c.multiplyScalar(2.0);
     if (a.barter) c.multiplyScalar(2.5);
     col[i*3] = Math.min(c.r, 1); col[i*3+1] = Math.min(c.g, 1); col[i*3+2] = Math.min(c.b, 1);
+    // Size: base + version_count influence + x402/barter boost
+    let s = 1.5 + Math.log2((a.versions?.length || 1) + 1) * 0.3;
+    if (a.x402) s += 1.5;
+    if (a.barter) s += 2.5;
+    siz[i] = s;
   }
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
 
-  if (!pointTex) pointTex = pointTexture();
+  if (!pointTex) pointTex = ledTexture();
   const mat = new THREE.PointsMaterial({
-    size: 2.5, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.9, map: pointTex,
-    alphaTest: 0.01, blending: THREE.AdditiveBlending, depthWrite: false,
+    size: 3.5,           // bigger = more visible LED dots
+    sizeAttenuation: true,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.95,
+    map: pointTex,
+    alphaTest: 0.01,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    depthTest: false,     // render on top of the globe (LED glow visible through the globe)
   });
 
   pointsObj = new THREE.Points(geo, mat);
@@ -482,6 +527,7 @@ function showPanel(a) {
       <div class="info-card"><div class="label">First seen</div><div class="value">${a.first_seen}</div></div>
     </div>
     <div class="link-list">${links.join('')}</div>
+    <button onclick="flyToAgent(agents.find(a=>a.name==='${a.name.replace(/'/g,"\\'")}'))" style="width:100%;margin-top:12px;padding:10px;background:linear-gradient(135deg,#ff6b35,#00d4ff);color:#000;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:1px">🎯 Fly to this agent</button>
     ${connectionsHTML}
   `;
   document.getElementById('panel-right').classList.add('open');
@@ -490,13 +536,74 @@ function showPanel(a) {
 window.showPanelByName = function(name) { const a = agents.find(x => x.name === name); if (a) showPanel(a); };
 function closePanel() { document.getElementById('panel-right').classList.remove('open'); }
 
+// ─── Zoom to agent (Idea 1: click agent in panel → camera flies to it) ──────
+let zoomTarget = null;
+function flyToAgent(agent) {
+  if (!agent.position) return;
+  // Compute target rotation so the agent faces the camera
+  const pos = agent.position.clone();
+  // Undo current rotation to get the "world" position
+  pos.applyAxisAngle(new THREE.Vector3(1, 0, 0), -rotX);
+  pos.applyAxisAngle(new THREE.Vector3(0, 1, 0), -rotY);
+  // Calculate the rotation needed to bring this point to the front
+  const targetRotY = Math.atan2(pos.x, pos.z);
+  const targetRotX = Math.atan2(pos.y, Math.sqrt(pos.x * pos.x + pos.z * pos.z));
+  // Smoothly animate to this rotation
+  zoomTarget = { rotY: -targetRotY, rotX: -targetRotX, dist: 140 };
+}
+
+// ─── Stats panel (Idea 3: real-time stats that update on filter) ────────────
+function updateStatsPanel() {
+  const total = filteredAgents.length;
+  const byKind = {};
+  filteredAgents.forEach(a => { byKind[a.kind] = (byKind[a.kind] || 0) + 1; });
+  const byCountry = {};
+  filteredAgents.forEach(a => { byCountry[a.country] = (byCountry[a.country] || 0) + 1; });
+  const topCountries = Object.entries(byCountry).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  let html = `<div style="margin-bottom:12px;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px">`;
+  html += `<div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">SHOWING ${total.toLocaleString()} AGENTS</div>`;
+  html += `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">`;
+  for (const [k, v] of Object.entries(byKind).sort((a, b) => b[1] - a[1])) {
+    const color = '#' + KIND_COLORS[k].toString(16).padStart(6, '0');
+    html += `<span style="font-size:10px;font-family:var(--mono);padding:2px 6px;border-radius:3px;background:${color}22;color:${color}">${k}: ${v}</span>`;
+  }
+  html += `</div>`;
+  if (topCountries.length > 1) {
+    html += `<div style="font-size:9px;color:var(--text-dim);margin-bottom:3px">TOP COUNTRIES</div>`;
+    for (const [c, n] of topCountries) {
+      const pct = (n / total * 100).toFixed(0);
+      html += `<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">`;
+      html += `<span style="font-size:10px;min-width:80px">${c}</span>`;
+      html += `<div style="flex:1;height:4px;background:rgba(255,255,255,0.05);border-radius:2px;overflow:hidden">`;
+      html += `<div style="width:${pct}%;height:100%;background:var(--accent-orange);border-radius:2px"></div>`;
+      html += `</div>`;
+      html += `<span style="font-size:9px;font-family:var(--mono);min-width:30px;text-align:right">${n}</span>`;
+      html += `</div>`;
+    }
+  }
+  html += `</div>`;
+  const statsEl = document.getElementById('stats-panel');
+  if (statsEl) statsEl.innerHTML = html;
+}
+
 // ─── Animation ──────────────────────────────────────────────────────────────
 let pulseT = 0;
 function animate() {
   requestAnimationFrame(animate);
   pulseT += 0.02;
 
-  if (!isDragging) {
+  // Zoom-to-agent animation
+  if (zoomTarget) {
+    rotY += (zoomTarget.rotY - rotY) * 0.06;
+    rotX += (zoomTarget.rotX - rotX) * 0.06;
+    camDistTarget += (zoomTarget.dist - camDistTarget) * 0.06;
+    if (Math.abs(zoomTarget.rotY - rotY) < 0.01 && Math.abs(zoomTarget.dist - camDistTarget) < 1) {
+      zoomTarget = null;
+    }
+  }
+
+  if (!isDragging && !zoomTarget) {
     if (!isPaused && !mouseOnGlobe) {
       rotY += velY; rotX += velX;
       velY = velY * 0.96 + 0.0005; velX *= 0.96;
@@ -515,6 +622,11 @@ function animate() {
   connectionLines.forEach((l, i) => {
     if (l.material) l.material.opacity = 0.2 + Math.sin(pulseT + i * 0.5) * 0.15;
   });
+
+  // Pulse the LED points (breathing effect)
+  if (pointsObj && pointsObj.material) {
+    pointsObj.material.size = 3.5 + Math.sin(pulseT) * 0.3;
+  }
 
   camera.position.z = camDist;
   renderer.render(scene, camera);
