@@ -261,12 +261,14 @@ function initGlobe() {
 
   // ── Satellites orbiting the Earth ──────────────────────────────────────────
   const satGroup = new THREE.Group();
-  const satCount = 12;
+  const satCount = 15;
   for (let i = 0; i < satCount; i++) {
-    const orbitRadius = R * (1.15 + Math.random() * 0.4);
-    const inclination = (Math.random() - 0.5) * Math.PI;
+    const orbitRadius = R * (1.2 + Math.random() * 0.5);
+    // Random 3D orbit orientation (not flat)
+    const inclX = (Math.random() - 0.5) * Math.PI;
+    const inclZ = (Math.random() - 0.5) * Math.PI;
     const phase = Math.random() * Math.PI * 2;
-    const speed = 0.001 + Math.random() * 0.002;
+    const speed = 0.003 + Math.random() * 0.005;
 
     // Satellite = small bright dot with trail
     const satGeo = new THREE.BufferGeometry();
@@ -274,26 +276,31 @@ function initGlobe() {
     satGeo.setAttribute('position', new THREE.BufferAttribute(satPos, 3));
 
     const satMat = new THREE.PointsMaterial({
-      color: 0x00d4ff, size: 2, sizeAttenuation: true,
-      transparent: true, opacity: 0.8,
+      color: 0x00d4ff, size: 4, sizeAttenuation: true,
+      transparent: true, opacity: 1.0,
       map: ledTexture(), alphaTest: 0.01,
-      blending: THREE.AdditiveBlending, depthWrite: false,
+      blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false,
     });
     const sat = new THREE.Points(satGeo, satMat);
-    sat.userData = { orbitRadius, inclination, phase, speed };
+    sat.userData = { orbitRadius, inclX, inclZ, phase, speed };
     satGroup.add(sat);
 
-    // Orbit trail (faint ring)
+    // Orbit trail (visible ring)
     const trailPts = [];
-    for (let a = 0; a < Math.PI * 2; a += 0.05) {
-      const x = orbitRadius * Math.cos(a) * Math.cos(inclination);
-      const y = orbitRadius * Math.sin(inclination);
-      const z = orbitRadius * Math.sin(a) * Math.cos(inclination);
-      trailPts.push(new THREE.Vector3(x, y, z));
+    for (let a = 0; a < Math.PI * 2; a += 0.04) {
+      let x = orbitRadius * Math.cos(a);
+      let z = orbitRadius * Math.sin(a);
+      let y = 0;
+      // Apply inclinations
+      const y1 = y * Math.cos(inclX) - z * Math.sin(inclX);
+      const z1 = y * Math.sin(inclX) + z * Math.cos(inclX);
+      const x2 = x * Math.cos(inclZ) + y1 * Math.sin(inclZ);
+      const y2 = -x * Math.sin(inclZ) + y1 * Math.cos(inclZ);
+      trailPts.push(new THREE.Vector3(x2, y2, z1));
     }
     const trailGeo = new THREE.BufferGeometry().setFromPoints(trailPts);
     const trailMat = new THREE.LineBasicMaterial({
-      color: 0x3060a0, transparent: true, opacity: 0.06, depthWrite: false,
+      color: 0x4080b0, transparent: true, opacity: 0.15, depthWrite: false,
     });
     satGroup.add(new THREE.Line(trailGeo, trailMat));
   }
@@ -435,7 +442,7 @@ function renderPoints() {
     alphaTest: 0.01,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
-    depthTest: false,     // render on top of the globe (LED glow visible through the globe)
+    depthTest: true,      // respect depth — points behind the globe are HIDDEN (no see-through)
   });
 
   pointsObj = new THREE.Points(geo, mat);
@@ -580,13 +587,14 @@ function showPanel(a) {
       <div class="info-card"><div class="label">First seen</div><div class="value">${a.first_seen}</div></div>
     </div>
     <div class="link-list">${links.join('')}</div>
-    <button onclick="flyToAgent(agents.find(a=>a.name==='${a.name.replace(/'/g,"\\'")}'))" style="width:100%;margin-top:12px;padding:10px;background:linear-gradient(135deg,#ff6b35,#00d4ff);color:#000;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:1px">🎯 Fly to this agent</button>
+    <button onclick="flyToAgentByName('${a.name.replace(/'/g,"\\'")}')" style="width:100%;margin-top:12px;padding:10px;background:linear-gradient(135deg,#ff6b35,#00d4ff);color:#000;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:1px">🎯 Fly to this agent</button>
     ${connectionsHTML}
   `;
   document.getElementById('panel-right').classList.add('open');
 }
 
 window.showPanelByName = function(name) { const a = agents.find(x => x.name === name); if (a) showPanel(a); };
+window.flyToAgentByName = function(name) { const a = agents.find(x => x.name === name); if (a) flyToAgent(a); };
 function closePanel() { document.getElementById('panel-right').classList.remove('open'); }
 
 // ─── Zoom to agent (Idea 1: click agent in panel → camera flies to it) ──────
@@ -688,10 +696,15 @@ function animate() {
       if (child instanceof THREE.Points && child.userData.orbitRadius) {
         const ud = child.userData;
         ud.phase += ud.speed;
-        const x = ud.orbitRadius * Math.cos(ud.phase) * Math.cos(ud.inclination);
-        const y = ud.orbitRadius * Math.sin(ud.inclination);
-        const z = ud.orbitRadius * Math.sin(ud.phase) * Math.cos(ud.inclination);
-        child.position.set(x, y, z);
+        // 3D orbit: start in XZ plane, then apply two inclinations
+        let x = ud.orbitRadius * Math.cos(ud.phase);
+        let z = ud.orbitRadius * Math.sin(ud.phase);
+        let y = 0;
+        const y1 = y * Math.cos(ud.inclX) - z * Math.sin(ud.inclX);
+        const z1 = y * Math.sin(ud.inclX) + z * Math.cos(ud.inclX);
+        const x2 = x * Math.cos(ud.inclZ) + y1 * Math.sin(ud.inclZ);
+        const y2 = -x * Math.sin(ud.inclZ) + y1 * Math.cos(ud.inclZ);
+        child.position.set(x2, y2, z1);
       }
     });
     // Rotate satellite group with the globe
