@@ -330,11 +330,11 @@ function renderPoints() {
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   if (!pointTex) pointTex = ledTexture();
   const mat = new THREE.PointsMaterial({
-    size: 2.5, sizeAttenuation: true, vertexColors: true,
+    size: 4, sizeAttenuation: true, vertexColors: true,
     transparent: true, opacity: 1.0, map: pointTex,
     alphaTest: 0.01,
-    blending: THREE.NormalBlending,
-    depthWrite: true, depthTest: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false, depthTest: true,
   });
   pointsObj = new THREE.Points(geo, mat);
   pointsObj.userData.agents = filteredAgents;
@@ -499,7 +499,7 @@ function animate() {
   });
   connectionLines.forEach((l, i) => { if (l.material) l.material.opacity = 0.2 + Math.sin(pulseT + i * 0.5) * 0.15; });
   // Pulse the LED dots
-  if (pointsObj && pointsObj.material) { pointsObj.material.size = 2.5 + Math.sin(pulseT) * 0.3; }
+  if (pointsObj && pointsObj.material) { pointsObj.material.size = 4 + Math.sin(pulseT) * 0.4; }
   // Animate satellites
   const sg = scene.userData.satellites;
   if (sg) {
