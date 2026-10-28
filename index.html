@@ -2,26 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Agent World Map — Global Registry of MCP Agents</title>
-  <meta name="description" content="Technical 3D globe locator of every agent in the official MCP Registry." />
+  <meta name="description" content="3D globe of every agent in the MCP Registry." />
   <meta name="author" content="AliceLabs LLC" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23050810' stroke='%23ff6b35' stroke-width='2'/><circle cx='30' cy='35' r='1.5' fill='%2322c55e'/><circle cx='70' cy='40' r='1.5' fill='%2300d4ff'/><circle cx='50' cy='50' r='2' fill='%23ff6b35'/></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23050810' stroke='%23ff6b35' stroke-width='2'/><circle cx='50' cy='50' r='2' fill='%23ff6b35'/></svg>" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <div id="loader">
     <div class="loader-spinner"></div>
-    <div class="loader-text">Initializing Agent World Map</div>
-    <div class="loader-detail" id="loader-detail">Loading 7,500+ agents from MCP Registry...</div>
+    <div class="loader-text">Agent World Map</div>
+    <div class="loader-detail" id="loader-detail">Loading 7,500+ agents...</div>
   </div>
 
   <div id="globe-canvas"></div>
 
   <header class="header">
+    <button class="mobile-menu-btn" id="mobile-menu-btn">☰</button>
     <div class="header-brand">
       <h1>Agent World Map</h1>
-      <div class="subtitle">registry.modelcontextprotocol.io · live scan</div>
+      <div class="subtitle">registry.modelcontextprotocol.io</div>
     </div>
     <div class="header-stats">
       <div><span class="stat-label">Agents</span><br><span class="stat-value" id="stat-total">—</span></div>
@@ -32,10 +33,10 @@
     </div>
   </header>
 
-  <aside class="sidebar-left" id="sidebar-left">
+  <aside class="sidebar-left collapsed" id="sidebar-left">
     <div class="sidebar-section">
       <h3>Search</h3>
-      <input type="text" class="search-box" id="search" placeholder="name, namespace, city..." />
+      <input type="text" class="search-box" id="search" placeholder="name, city, country..." />
     </div>
     <div class="sidebar-section">
       <h3>Country</h3>
@@ -53,7 +54,7 @@
         <span class="dot" style="background:#e0e6ed"></span><span>All Agents</span><span class="count" id="count-all">—</span>
       </button>
       <button class="filter-btn" data-filter="firewall">
-        <span class="dot" style="background:#ff6b35"></span><span>Firewall / Protection</span><span class="count">—</span>
+        <span class="dot" style="background:#ff6b35"></span><span>Firewall</span><span class="count">—</span>
       </button>
       <button class="filter-btn" data-filter="payment">
         <span class="dot" style="background:#00d4ff"></span><span>Payment / x402</span><span class="count">—</span>
@@ -62,16 +63,16 @@
         <span class="dot" style="background:#a78bfa"></span><span>Compute / GPU</span><span class="count">—</span>
       </button>
       <button class="filter-btn" data-filter="directory">
-        <span class="dot" style="background:#fbbf24"></span><span>Directory / Registry</span><span class="count">—</span>
+        <span class="dot" style="background:#fbbf24"></span><span>Directory</span><span class="count">—</span>
       </button>
       <button class="filter-btn" data-filter="publisher">
-        <span class="dot" style="background:#22c55e"></span><span>Publisher / MCP Server</span><span class="count">—</span>
+        <span class="dot" style="background:#22c55e"></span><span>Publisher</span><span class="count">—</span>
       </button>
       <button class="filter-btn" data-filter="bridge">
-        <span class="dot" style="background:#ec4899"></span><span>Bridge / Gateway</span><span class="count">—</span>
+        <span class="dot" style="background:#ec4899"></span><span>Bridge</span><span class="count">—</span>
       </button>
       <button class="filter-btn" data-filter="observer">
-        <span class="dot" style="background:#f43f5e"></span><span>Observer / Threat-Intel</span><span class="count">—</span>
+        <span class="dot" style="background:#f43f5e"></span><span>Observer</span><span class="count">—</span>
       </button>
     </div>
     <div class="sidebar-section">
@@ -91,12 +92,11 @@
       <h3>How to use</h3>
       <p style="font-size:10px;color:var(--text-dim);line-height:1.6">
         🖱️ Drag to rotate · Scroll to zoom<br>
-        📍 Click a point for details<br>
-        ⏸️ Pause stops rotation<br>
-        🔄 Hover also pauses rotation<br>
-        🔗 Arcs show x402↔barter connections<br>
+        📍 Tap a point for details<br>
+        ⏸️ Tap globe to stop rotation<br>
         🔍 Search by name, city, or country<br>
-        🌐 <a href="https://registry.modelcontextprotocol.io" target="_blank" style="color:var(--accent-orange)">MCP Registry</a> · <a href="https://wall.utalabs.tech" target="_blank" style="color:var(--accent-orange)">uta-shield</a>
+        🛰️ 15 real satellites orbiting<br>
+        🌐 <a href="https://registry.modelcontextprotocol.io" target="_blank" style="color:var(--accent-orange)">MCP Registry</a>
       </p>
     </div>
   </aside>
@@ -111,7 +111,7 @@
   <div id="tooltip"></div>
 
   <footer class="footer">
-    <span id="footer-text">Loading data from MCP Registry...</span>
+    <span id="footer-text">Loading...</span>
   </footer>
 
   <script src="js/three.js"></script>
