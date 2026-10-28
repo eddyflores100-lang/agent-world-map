@@ -186,8 +186,8 @@ function initGlobe() {
 
   const earthSpec = texLoader.load('assets/earth_specular.png');
 
-  // ── Globe: real Earth, translucent ─────────────────────────────────────────
-  const globeGeo = new THREE.SphereGeometry(R, 128, 128);  // more segments for smoother sphere
+  // ── Globe: real Earth, OPAQUE (not translucent) ─────────────────────────────
+  const globeGeo = new THREE.SphereGeometry(R, 128, 128);
   globe = new THREE.Mesh(globeGeo, new THREE.MeshPhongMaterial({
     map: earthDay,
     bumpMap: earthBump,
@@ -195,8 +195,7 @@ function initGlobe() {
     specularMap: earthSpec,
     specular: new THREE.Color(0x4488bb),
     shininess: 30,
-    transparent: true,
-    opacity: 0.78,   // translucent — you can see agent points through the globe
+    transparent: false,    // OPAQUE — no translucency, looks like real Earth
     side: THREE.FrontSide,
   }));
   scene.add(globe);
@@ -240,6 +239,66 @@ function initGlobe() {
     depthWrite: false,
   });
   scene.add(new THREE.Mesh(atmGeo, atmMat));
+
+  // ── Country border lines (political boundaries) ─────────────────────────────
+  // Loaded from data/borders.json (Natural Earth 110m countries)
+  fetch('data/borders.json')
+    .then(r => r.json())
+    .then(borders => {
+      const borderMat = new THREE.LineBasicMaterial({
+        color: 0x4a6a8a, transparent: true, opacity: 0.4, depthWrite: false,
+      });
+      borders.forEach(borderLine => {
+        const pts = borderLine.map(([lat, lon]) => latLonToVec3(lat, lon, R * 1.003));
+        if (pts.length > 1) {
+          const geo = new THREE.BufferGeometry().setFromPoints(pts);
+          scene.add(new THREE.Line(geo, borderMat));
+        }
+      });
+      console.log(`Loaded ${borders.length} country border lines`);
+    })
+    .catch(e => console.log('Borders load error:', e));
+
+  // ── Satellites orbiting the Earth ──────────────────────────────────────────
+  const satGroup = new THREE.Group();
+  const satCount = 12;
+  for (let i = 0; i < satCount; i++) {
+    const orbitRadius = R * (1.15 + Math.random() * 0.4);
+    const inclination = (Math.random() - 0.5) * Math.PI;
+    const phase = Math.random() * Math.PI * 2;
+    const speed = 0.001 + Math.random() * 0.002;
+
+    // Satellite = small bright dot with trail
+    const satGeo = new THREE.BufferGeometry();
+    const satPos = new Float32Array(3);
+    satGeo.setAttribute('position', new THREE.BufferAttribute(satPos, 3));
+
+    const satMat = new THREE.PointsMaterial({
+      color: 0x00d4ff, size: 2, sizeAttenuation: true,
+      transparent: true, opacity: 0.8,
+      map: ledTexture(), alphaTest: 0.01,
+      blending: THREE.AdditiveBlending, depthWrite: false,
+    });
+    const sat = new THREE.Points(satGeo, satMat);
+    sat.userData = { orbitRadius, inclination, phase, speed };
+    satGroup.add(sat);
+
+    // Orbit trail (faint ring)
+    const trailPts = [];
+    for (let a = 0; a < Math.PI * 2; a += 0.05) {
+      const x = orbitRadius * Math.cos(a) * Math.cos(inclination);
+      const y = orbitRadius * Math.sin(inclination);
+      const z = orbitRadius * Math.sin(a) * Math.cos(inclination);
+      trailPts.push(new THREE.Vector3(x, y, z));
+    }
+    const trailGeo = new THREE.BufferGeometry().setFromPoints(trailPts);
+    const trailMat = new THREE.LineBasicMaterial({
+      color: 0x3060a0, transparent: true, opacity: 0.06, depthWrite: false,
+    });
+    satGroup.add(new THREE.Line(trailGeo, trailMat));
+  }
+  scene.add(satGroup);
+  scene.userData.satellites = satGroup;
 }
 
 // ─── Data loading ────────────────────────────────────────────────────────────
@@ -320,26 +379,20 @@ function applyFilter(filter) {
   updateStatsPanel();
 }
 
-// ─── Point rendering (LED-style glowing sprites) ─────────────────────────────
+// ─── Point rendering (bright sharp LED dots, not dim 80s pixels) ──────────────
 function ledTexture() {
   const c = document.createElement('canvas');
   c.width = 128; c.height = 128;
   const ctx = c.getContext('2d');
-  // LED dot: bright center + soft glow halo + sharp edge
-  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-  g.addColorStop(0, 'rgba(255,255,255,1)');       // hot center
-  g.addColorStop(0.15, 'rgba(255,255,255,0.95)');  // bright core
-  g.addColorStop(0.3, 'rgba(255,255,255,0.6)');   // inner glow
-  g.addColorStop(0.55, 'rgba(255,255,255,0.2)');   // mid glow
-  g.addColorStop(0.8, 'rgba(255,255,255,0.05)');   // outer halo
-  g.addColorStop(1, 'rgba(255,255,255,0)');        // fade to nothing
+  // Sharp bright dot: white-hot center + tight glow
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 24);
+  g.addColorStop(0, 'rgba(255,255,255,1)');       // white-hot center
+  g.addColorStop(0.25, 'rgba(255,255,255,0.9)');  // bright core
+  g.addColorStop(0.5, 'rgba(255,255,255,0.5)');   // glow
+  g.addColorStop(0.75, 'rgba(255,255,255,0.1)');  // dim halo
+  g.addColorStop(1, 'rgba(255,255,255,0)');         // nothing
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 128, 128);
-  // Add a bright ring for the "LED" look
-  ctx.beginPath();
-  ctx.arc(64, 64, 18, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,0.15)';
-  ctx.fill();
   return new THREE.CanvasTexture(c);
 }
 
@@ -626,6 +679,24 @@ function animate() {
   // Pulse the LED points (breathing effect)
   if (pointsObj && pointsObj.material) {
     pointsObj.material.size = 3.5 + Math.sin(pulseT) * 0.3;
+  }
+
+  // Animate satellites
+  const satGroup = scene.userData.satellites;
+  if (satGroup) {
+    satGroup.children.forEach(child => {
+      if (child instanceof THREE.Points && child.userData.orbitRadius) {
+        const ud = child.userData;
+        ud.phase += ud.speed;
+        const x = ud.orbitRadius * Math.cos(ud.phase) * Math.cos(ud.inclination);
+        const y = ud.orbitRadius * Math.sin(ud.inclination);
+        const z = ud.orbitRadius * Math.sin(ud.phase) * Math.cos(ud.inclination);
+        child.position.set(x, y, z);
+      }
+    });
+    // Rotate satellite group with the globe
+    satGroup.rotation.y = rotY;
+    satGroup.rotation.x = rotX;
   }
 
   camera.position.z = camDist;
