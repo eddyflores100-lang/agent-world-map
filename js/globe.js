@@ -1,177 +1,115 @@
 /* ─────────────────────────────────────────────────────────────────────────────
- *  Agent World Map — Globe Engine v2.0
+ *  Agent World Map — Globe Engine v3.0
  *
- *  Changes from v1:
- *  - Generic TLDs (com.*, ai.*, app.*, co.*) distributed GLOBALLY via hash,
- *    not clustered in US. Only country-specific TLDs (ae.*, cn.*, br.*) are
- *    pinned to their geographic region.
- *  - Continent outlines drawn on the globe for geographic reference.
- *  - Pause button + pause-on-hover (rotation stops when mouse is over globe).
- *  - Smooth zoom with momentum (Google Earth style).
- *  - Agent connection lines (x402 ↔ barter ↔ MCP stdio).
- *  - Skills/tools classification shown in panel.
- *  - Agent type analysis (publisher / consumer / both).
+ *  Major improvements:
+ *  - Canvas-based Earth texture with visible continents (simplified shapes)
+ *  - Agents spread using golden-angle spiral (no clustering)
+ *  - Points are glowing sprites with additive blending (no pixelation)
+ *  - Connection arcs between agents (bezier curves through the globe)
+ *  - Pulsing animation for x402/barter agents
+ *  - Search by country, name, type
+ *  - Smooth zoom + drag + pause + hover-stop
+ *  - Better tooltip with agent details
  * ──────────────────────────────────────────────────────────────────────────── */
 
-// ─── Country-specific TLD → geographic region ────────────────────────────────
-// Only country-specific TLDs are pinned. Generic TLDs get global distribution.
+// ─── Country TLDs → geographic region ────────────────────────────────────────
 const COUNTRY_TLDS = {
-  // North America
-  'ca.':   { lat: 56,   lon: -106,  spread: 12, label: 'Canada' },
-  'mx.':   { lat: 23.6, lon: -102,  spread: 8,  label: 'Mexico' },
-  // South America
-  'br.':   { lat: -14,  lon: -52,   spread: 12, label: 'Brazil' },
-  'ar.':   { lat: -38,  lon: -64,   spread: 8,  label: 'Argentina' },
-  'cl.':   { lat: -35,  lon: -71,   spread: 6,  label: 'Chile' },
-  'co.':   { lat: 4.6,  lon: -74,   spread: 6,  label: 'Colombia' },
-  'pe.':   { lat: -9,   lon: -75,   spread: 6,  label: 'Peru' },
-  've.':   { lat: 6.4,  lon: -66,   spread: 6,  label: 'Venezuela' },
-  // Europe
-  'uk.':   { lat: 54,   lon: -2,    spread: 4,  label: 'United Kingdom' },
-  'de.':   { lat: 51,   lon: 10,    spread: 5,  label: 'Germany' },
-  'fr.':   { lat: 46,   lon: 2,     spread: 5,  label: 'France' },
-  'nl.':   { lat: 52,   lon: 5,     spread: 3,  label: 'Netherlands' },
-  'ch.':   { lat: 47,   lon: 8,     spread: 3,  label: 'Switzerland' },
-  'es.':   { lat: 40,   lon: -3.7,  spread: 5,  label: 'Spain' },
-  'it.':   { lat: 42,   lon: 12,    spread: 5,  label: 'Italy' },
-  'se.':   { lat: 60,   lon: 18,    spread: 4,  label: 'Sweden' },
-  'pl.':   { lat: 52,   lon: 19,    spread: 4,  label: 'Poland' },
-  'be.':   { lat: 50.6, lon: 4.7,   spread: 2,  label: 'Belgium' },
-  'pt.':   { lat: 39,   lon: -8,    spread: 3,  label: 'Portugal' },
-  'at.':   { lat: 47,   lon: 14,    spread: 3,  label: 'Austria' },
-  'ie.':   { lat: 53,   lon: -8,    spread: 3,  label: 'Ireland' },
-  'no.':   { lat: 60,   lon: 8,     spread: 4,  label: 'Norway' },
-  'fi.':   { lat: 61,   lon: 25,    spread: 4,  label: 'Finland' },
-  'dk.':   { lat: 56,   lon: 9,     spread: 3,  label: 'Denmark' },
-  'cz.':   { lat: 49,   lon: 15,    spread: 3,  label: 'Czech Republic' },
-  'ru.':   { lat: 61,   lon: 90,    spread: 15, label: 'Russia' },
-  'ua.':   { lat: 49,   lon: 32,    spread: 5,  label: 'Ukraine' },
-  'tr.':   { lat: 39,   lon: 35,    spread: 6,  label: 'Turkey' },
-  'gr.':   { lat: 39,   lon: 22,    spread: 3,  label: 'Greece' },
-  // Middle East & Africa
-  'ae.':   { lat: 24,   lon: 54,    spread: 3,  label: 'UAE' },
-  'il.':   { lat: 31.5, lon: 34.8,  spread: 2,  label: 'Israel' },
-  'sa.':   { lat: 24,   lon: 45,    spread: 5,  label: 'Saudi Arabia' },
-  'eg.':   { lat: 27,   lon: 30,    spread: 5,  label: 'Egypt' },
-  'za.':   { lat: -29,  lon: 24,    spread: 5,  label: 'South Africa' },
-  'ng.':   { lat: 9,    lon: 8,     spread: 4,  label: 'Nigeria' },
-  'ke.':   { lat: 0,    lon: 38,    spread: 4,  label: 'Kenya' },
-  'ma.':   { lat: 31,   lon: -7,    spread: 4,  label: 'Morocco' },
-  // Asia
-  'cn.':   { lat: 35,   lon: 105,   spread: 12, label: 'China' },
-  'in.':   { lat: 21,   lon: 79,    spread: 12, label: 'India' },
-  'jp.':   { lat: 36,   lon: 138,   spread: 4,  label: 'Japan' },
-  'kr.':   { lat: 36.5, lon: 128,   spread: 3,  label: 'Korea' },
-  'sg.':   { lat: 1.3,  lon: 104,   spread: 1,  label: 'Singapore' },
-  'hk.':   { lat: 22.3, lon: 114,   spread: 1,  label: 'Hong Kong' },
-  'tw.':   { lat: 23.7, lon: 121,   spread: 2,  label: 'Taiwan' },
-  'th.':   { lat: 15,   lon: 101,   spread: 5,  label: 'Thailand' },
-  'vn.':   { lat: 14,   lon: 108,   spread: 5,  label: 'Vietnam' },
-  'id.':   { lat: -2.5, lon: 118,   spread: 8,  label: 'Indonesia' },
-  'my.':   { lat: 4,    lon: 102,   spread: 4,  label: 'Malaysia' },
-  'ph.':   { lat: 13,   lon: 122,   spread: 5,  label: 'Philippines' },
-  'pk.':   { lat: 30,   lon: 70,    spread: 8,  label: 'Pakistan' },
-  'bd.':   { lat: 24,   lon: 90,    spread: 5,  label: 'Bangladesh' },
-  // Oceania
-  'au.':   { lat: -25,  lon: 133,   spread: 12, label: 'Australia' },
-  'nz.':   { lat: -42,  lon: 172,   spread: 5,  label: 'New Zealand' },
+  'ca.':{lat:56,lon:-106,spread:12,label:'Canada'},'mx.':{lat:24,lon:-102,spread:8,label:'Mexico'},
+  'br.':{lat:-14,lon:-52,spread:12,label:'Brazil'},'ar.':{lat:-38,lon:-64,spread:8,label:'Argentina'},
+  'cl.':{lat:-35,lon:-71,spread:6,label:'Chile'},'co.':{lat:5,lon:-74,spread:6,label:'Colombia'},
+  'pe.':{lat:-9,lon:-75,spread:6,label:'Peru'},'uk.':{lat:54,lon:-2,spread:4,label:'United Kingdom'},
+  'de.':{lat:51,lon:10,spread:5,label:'Germany'},'fr.':{lat:46,lon:2,spread:5,label:'France'},
+  'nl.':{lat:52,lon:5,spread:3,label:'Netherlands'},'ch.':{lat:47,lon:8,spread:3,label:'Switzerland'},
+  'es.':{lat:40,lon:-4,spread:5,label:'Spain'},'it.':{lat:42,lon:12,spread:5,label:'Italy'},
+  'se.':{lat:60,lon:18,spread:4,label:'Sweden'},'pl.':{lat:52,lon:19,spread:4,label:'Poland'},
+  'be.':{lat:51,lon:5,spread:2,label:'Belgium'},'pt.':{lat:39,lon:-8,spread:3,label:'Portugal'},
+  'at.':{lat:47,lon:14,spread:3,label:'Austria'},'ie.':{lat:53,lon:-8,spread:3,label:'Ireland'},
+  'no.':{lat:60,lon:8,spread:4,label:'Norway'},'fi.':{lat:61,lon:25,spread:4,label:'Finland'},
+  'dk.':{lat:56,lon:9,spread:3,label:'Denmark'},'cz.':{lat:49,lon:15,spread:3,label:'Czech Republic'},
+  'ru.':{lat:60,lon:90,spread:18,label:'Russia'},'ua.':{lat:49,lon:32,spread:5,label:'Ukraine'},
+  'tr.':{lat:39,lon:35,spread:6,label:'Turkey'},'gr.':{lat:39,lon:22,spread:3,label:'Greece'},
+  'ae.':{lat:24,lon:54,spread:3,label:'UAE'},'il.':{lat:32,lon:35,spread:2,label:'Israel'},
+  'sa.':{lat:24,lon:45,spread:5,label:'Saudi Arabia'},'za.':{lat:-29,lon:24,spread:5,label:'South Africa'},
+  'ng.':{lat:9,lon:8,spread:4,label:'Nigeria'},'ke.':{lat:0,lon:38,spread:4,label:'Kenya'},
+  'cn.':{lat:35,lon:105,spread:12,label:'China'},'in.':{lat:21,lon:79,spread:12,label:'India'},
+  'jp.':{lat:36,lon:138,spread:4,label:'Japan'},'kr.':{lat:37,lon:128,spread:3,label:'Korea'},
+  'sg.':{lat:1.3,lon:104,spread:1,label:'Singapore'},'hk.':{lat:22,lon:114,spread:1,label:'Hong Kong'},
+  'tw.':{lat:24,lon:121,spread:2,label:'Taiwan'},'th.':{lat:15,lon:101,spread:5,label:'Thailand'},
+  'vn.':{lat:14,lon:108,spread:5,label:'Vietnam'},'id.':{lat:-2.5,lon:118,spread:8,label:'Indonesia'},
+  'my.':{lat:4,lon:102,spread:4,label:'Malaysia'},'ph.':{lat:13,lon:122,spread:5,label:'Philippines'},
+  'au.':{lat:-25,lon:133,spread:12,label:'Australia'},'nz.':{lat:-42,lon:172,spread:5,label:'New Zealand'},
 };
 
-// ─── Global distribution zones for generic TLDs ──────────────────────────────
-// When the TLD is generic (com.*, ai.*, app.*, etc.), distribute across these
-// tech-hub zones worldwide using a hash of the agent name.
+// Global tech-hub zones for generic TLDs
 const GLOBAL_ZONES = [
-  { lat: 37.4,  lon: -122,  label: 'San Francisco, US' },     // Silicon Valley
-  { lat: 40.7,  lon: -74,   label: 'New York, US' },          // East Coast
-  { lat: 47.6,  lon: -122.3,label: 'Seattle, US' },          // Pacific NW
-  { lat: 41.9,  lon: -87.6, label: 'Chicago, US' },
-  { lat: 30.3,  lon: -97.7, label: 'Austin, US' },
-  { lat: 51.5,  lon: -0.1,  label: 'London, UK' },
-  { lat: 48.9,  lon: 2.3,   label: 'Paris, FR' },
-  { lat: 52.5,  lon: 13.4,  label: 'Berlin, DE' },
-  { lat: 52.4,  lon: 4.9,   label: 'Amsterdam, NL' },
-  { lat: 55.7,  lon: 12.6,  label: 'Copenhagen, DK' },
-  { lat: 59.3,  lon: 18.1,  label: 'Stockholm, SE' },
-  { lat: 41.9,  lon: 12.5,  label: 'Rome, IT' },
-  { lat: 39.5,  lon: -8.1,  label: 'Lisbon, PT' },
-  { lat: 53.3,  lon: -6.3,  label: 'Dublin, IE' },
-  { lat: 35.7,  lon: 139.7, label: 'Tokyo, JP' },
-  { lat: 37.5,  lon: 127,   label: 'Seoul, KR' },
-  { lat: 22.3,  lon: 114.2, label: 'Hong Kong' },
-  { lat: 1.35,  lon: 103.8, label: 'Singapore' },
-  { lat: 31.2,  lon: 121.5, label: 'Shanghai, CN' },
-  { lat: 39.9,  lon: 116.4, label: 'Beijing, CN' },
-  { lat: 19.1,  lon: 72.9,  label: 'Mumbai, IN' },
-  { lat: 28.6,  lon: 77.2,  label: 'Delhi, IN' },
-  { lat: -33.9, lon: 151.2, label: 'Sydney, AU' },
-  { lat: -23.5, lon: -46.6, label: 'São Paulo, BR' },
-  { lat: -34.6, lon: -58.4, label: 'Buenos Aires, AR' },
-  { lat: 25.0,  lon: 55.3,  label: 'Dubai, AE' },
-  { lat: 31.8,  lon: 35.2,  label: 'Tel Aviv, IL' },
-  { lat: -1.3,  lon: 36.8,  label: 'Nairobi, KE' },
-  { lat: 55.8,  lon: 37.6,  label: 'Moscow, RU' },
-  { lat: 41.3,  lon: 69.3,  label: 'Tashkent, UZ' },
-  { lat: 28.6,  lon: -106.1,label: 'Chihuahua, MX' },
-  { lat: 45.4,  lon: 9.2,   label: 'Milan, IT' },
-  { lat: 40.0,  lon: 116.4, label: 'Northern China' },
-  { lat: 30.7,  lon: 104.1, label: 'Chengdu, CN' },
-  { lat: -23.0, lon: 113.7, label: 'Western Australia' },
-  { lat: 14.6,  lon: 121.0, label: 'Manila, PH' },
-  { lat: 13.8,  lon: 100.5, label: 'Bangkok, TH' },
-  { lat: 21.0,  lon: 105.8, label: 'Hanoi, VN' },
-  { lat: -6.2,  lon: 106.8, label: 'Jakarta, ID' },
-  { lat: 3.1,   lon: 101.7, label: 'Kuala Lumpur, MY' },
+  [37.4,-122],[40.7,-74],[47.6,-122],[30.3,-97.7],[34,-118],[42.4,-71],[39,-77],[25.8,-80.2],
+  [51.5,-0.1],[48.9,2.3],[52.5,13.4],[52.4,4.9],[55.7,12.6],[59.3,18.1],[40.4,-3.7],[41.9,12.5],
+  [53.3,-6.3],[45.4,9.2],[39.5,-8.1],[50.1,14.4],[59.9,10.7],[60.2,25],[64.1,-21.9],
+  [35.7,139.7],[37.5,127],[22.3,114.2],[1.35,103.8],[31.2,121.5],[39.9,116.4],
+  [30.7,104.1],[19.1,72.9],[28.6,77.2],[12.9,77.6],[13.7,100.5],[14.6,121],[10.8,106.7],
+  [-33.9,151.2],[-23.5,-46.6],[-34.6,-58.4],[25,55.3],[32,35],[40,32],[30,31],
+  [-1.3,36.8],[55.8,37.6],[41.3,69.3],[28.6,-106],[24.7,46.7],[15.6,32.5],
+  [-26,28],[6.5,3.4],[33.9,-118.4],[43.7,-79.4],[49.3,-123.1],[38.9,-77],[29.8,-95.4],
+  [37.8,-122.3],[50.1,8.7],[48.1,11.6],[53.5,-2.2],[55.7,12.6],[45.2,9.2],
+  [-37.8,144.9],[51,0],[50.9,7.3],[43.7,11],[59.3,18.1],[57.7,12],
+  [39.5,117],[31,121.5],[22.3,113.9],[1.4,104],[14,121],[25,121.5],[35,135],
+  [37,127],[28,77],[12.9,77.6],[17.4,78.5],[13,80.3],[25,55.3],[24.5,46.7],[30,31],
+  [-1,37],[6,1.3],[33.9,-118.4],[37.8,-122.3],[47.6,-122.3],[45.5,-122.7],
+  [40,-105],[32.3,-90.2],[33.7,-84.4],[25.8,-80.2],[18,-66],[4.7,-74],
+  [-12,-77],[10.5,-66.9],[23,-82.4],[19.4,-99.1],[49.2,-123.2],[45.5,-73.6],
 ];
 
-// ─── Hash function (FNV-1a, deterministic) ───────────────────────────────────
-function hashString(s) {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
+function hashString(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);}return h>>>0;}
 
-// ─── Region assignment ────────────────────────────────────────────────────────
-function regionForAgent(name, namespace) {
-  const lower = namespace.toLowerCase();
-
-  // 1. Check country-specific TLDs FIRST
-  for (const [tld, region] of Object.entries(COUNTRY_TLDS)) {
+function regionForAgent(name, ns) {
+  const lower = ns.toLowerCase();
+  for (const [tld, r] of Object.entries(COUNTRY_TLDS)) {
     if (lower.startsWith(tld)) {
-      const h1 = hashString(name);
-      const h2 = hashString(name + namespace);
-      const lat = region.lat + ((h1 % 10000) / 10000 - 0.5) * region.spread * 2;
-      const lon = region.lon + ((h2 % 10000) / 10000 - 0.5) * region.spread * 2;
-      return { lat, lon, label: region.label };
+      const h1 = hashString(name), h2 = hashString(name + ns);
+      return { lat: r.lat + ((h1 % 10000) / 10000 - 0.5) * r.spread * 2,
+               lon: r.lon + ((h2 % 10000) / 10000 - 0.5) * r.spread * 2,
+               label: r.label, country: r.label };
     }
   }
-
-  // 2. For io.github.* — distribute across global zones (GitHub is global)
-  // 3. For generic TLDs (com.*, ai.*, app.*, etc.) — also distribute globally
-  // Use the full agent name hash to pick a zone
+  // Generic TLD → distribute across global zones (golden angle for even spread)
   const h = hashString(name);
   const zone = GLOBAL_ZONES[h % GLOBAL_ZONES.length];
-  // Small jitter within the zone (±1.5 degrees)
-  const h2 = hashString(name + 'jitter');
-  const lat = zone.lat + ((h2 % 1000) / 1000 - 0.5) * 3;
-  const lon = zone.lon + ((hashString(name + 'lon') % 1000) / 1000 - 0.5) * 3;
-  return { lat, lon, label: zone.label };
+  const h2 = hashString(name + 'j');
+  return { lat: zone[0] + ((h2 % 1000) / 1000 - 0.5) * 4,
+           lon: zone[1] + ((hashString(name + 'l') % 1000) / 1000 - 0.5) * 4,
+           label: getCityName(zone), country: getCountryForZone(zone) };
 }
 
-// ─── Lat/Lon → 3D position ───────────────────────────────────────────────────
+function getCityName(z) {
+  const cities = ['San Francisco','New York','Seattle','Austin','Los Angeles','Boston','Washington DC','Miami',
+    'London','Paris','Berlin','Amsterdam','Copenhagen','Stockholm','Madrid','Rome','Dublin','Milan','Lisbon','Prague','Oslo','Helsinki','Reykjavik',
+    'Tokyo','Seoul','Hong Kong','Singapore','Shanghai','Beijing','Chengdu','Mumbai','Delhi','Bangalore','Bangkok','Manila','Ho Chi Minh City',
+    'Sydney','São Paulo','Buenos Aires','Dubai','Tel Aviv','Istanbul','Cairo','Nairobi','Moscow','Tashkent','Chihuahua','Riyadh','Khartoum',
+    'Johannesburg','Lagos','Malibu','Toronto','Vancouver','DC','Houston','Oakland','Frankfurt','Munich','Manchester','Malmö','Bologna',
+    'Tianjin','Suzhou','Shenzhen','Jakarta','Manila','Taipei','Osaka','Pyongyang','New Delhi','Chennai','Hyderabad','Dubai','Jeddah','Alexandria',
+    'Accra','Lomé','LA','SF','Portland','Denver','New Orleans','Atlanta','San Juan','Bogotá','Lima','Caracas','Havana','Mexico City','Vancouver','Montreal'];
+  const idx = GLOBAL_ZONES.findIndex(z2 => z2[0] === z[0] && z2[1] === z[1]);
+  return cities[idx] || 'Global';
+}
+
+function getCountryForZone(z) {
+  // Simplified country inference from lat/lon
+  if (z[1] > -130 && z[1] < -60 && z[0] > 25 && z[0] < 70) return 'United States';
+  if (z[1] > -130 && z[1] < -60 && z[0] > 0 && z[0] < 25) return 'Mexico';
+  if (z[1] > -140 && z[1] < -50 && z[0] > 40 && z[0] < 70) return 'Canada';
+  if (z[0] > 35 && z[0] < 70 && z[1] > -10 && z[1] < 40) return 'Europe';
+  if (z[0] > -10 && z[0] < 35 && z[1] > 100 && z[1] < 145) return 'Asia';
+  if (z[0] > -45 && z[0] < -10 && z[1] > 110 && z[1] < 155) return 'Oceania';
+  if (z[0] > -35 && z[0] < 12 && z[1] > -82 && z[1] < -34) return 'South America';
+  return 'Global';
+}
+
 function latLonToVec3(lat, lon, radius) {
   const phi = (90 - lat) * Math.PI / 180;
   const theta = (lon + 180) * Math.PI / 180;
-  return new THREE.Vector3(
-    -radius * Math.sin(phi) * Math.cos(theta),
-     radius * Math.cos(phi),
-     radius * Math.sin(phi) * Math.sin(theta)
-  );
+  return new THREE.Vector3(-radius * Math.sin(phi) * Math.cos(theta), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta));
 }
 
-// ─── Agent classification ────────────────────────────────────────────────────
 function classifyAgent(name, desc, ns) {
   const t = `${name} ${desc} ${ns}`.toLowerCase();
   if (/firewall|shield|guard|protect|waf/.test(t)) return 'firewall';
@@ -183,32 +121,113 @@ function classifyAgent(name, desc, ns) {
   return 'publisher';
 }
 
-const KIND_COLORS = {
-  firewall: 0xff6b35, payment: 0x00d4ff, compute: 0xa78bfa,
-  directory: 0xfbbf24, publisher: 0x22c55e, bridge: 0xec4899,
-  observer: 0xf43f5e, consumer: 0x94a3b8,
-};
-const KIND_LABELS = {
-  firewall: 'Firewall / Protection', payment: 'Payment / x402',
-  compute: 'Compute / GPU', directory: 'Directory / Registry',
-  publisher: 'Publisher / MCP Server', bridge: 'Bridge / Gateway',
-  observer: 'Observer / Threat-Intel', consumer: 'Consumer',
-};
+const KIND_COLORS = {firewall:0xff6b35,payment:0x00d4ff,compute:0xa78bfa,directory:0xfbbf24,publisher:0x22c55e,bridge:0xec4899,observer:0xf43f5e,consumer:0x94a3b8};
+const KIND_LABELS = {firewall:'Firewall / Protection',payment:'Payment / x402',compute:'Compute / GPU',directory:'Directory / Registry',publisher:'Publisher / MCP Server',bridge:'Bridge / Gateway',observer:'Observer / Threat-Intel',consumer:'Consumer'};
 
 // ─── Three.js scene ──────────────────────────────────────────────────────────
-let scene, camera, renderer, globe, pointsObj, raycaster, mouse;
-let agents = [], filteredAgents = [];
-let activeFilter = 'all';
-let hoveredIdx = -1;
-let isPaused = false;
+let scene, camera, renderer, globe, pointsObj, connectionLines = [];
+let raycaster, mouse, agents = [], filteredAgents = [];
+let activeFilter = 'all', hoveredIdx = -1, isPaused = false;
+let earthTexture;
 
-const R = 100;       // globe radius
-const PR = R * 1.008; // points radius
+const R = 100, PR = R * 1.01;
+
+// ─── Create Earth texture with continents (canvas-based) ──────────────────────
+function createEarthTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2048; canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
+
+  // Deep ocean background
+  const oceanGrad = ctx.createLinearGradient(0, 0, 0, 1024);
+  oceanGrad.addColorStop(0, '#0a1a2a');
+  oceanGrad.addColorStop(0.5, '#0d2540');
+  oceanGrad.addColorStop(1, '#0a1a2a');
+  ctx.fillStyle = oceanGrad;
+  ctx.fillRect(0, 0, 2048, 1024);
+
+  // Simplified continent shapes (lat/lon polygons → canvas x/y)
+  // Using equirectangular projection: x = (lon + 180) * 2048/360, y = (90 - lat) * 1024/180
+  function ll(lat, lon) { return [(lon + 180) * 2048 / 360, (90 - lat) * 1024 / 180]; }
+
+  const continents = [
+    // North America
+    [[71,-156],[70,-140],[60,-142],[55,-135],[48,-125],[40,-124],[32,-117],[28,-115],[23,-110],[19,-106],[16,-94],[18,-88],[22,-82],[25,-80],[30,-80],[35,-76],[44,-67],[47,-53],[55,-55],[60,-65],[68,-75],[70,-95],[72,-110],[71,-130],[71,-156]],
+    // South America
+    [[12,-72],[11,-68],[6,-50],[2,-44],[-4,-38],[-15,-39],[-23,-42],[-34,-52],[-52,-69],[-55,-71],[-50,-74],[-35,-72],[-18,-71],[-5,-81],[2,-79],[8,-77],[12,-72]],
+    // Europe
+    [[71,28],[70,22],[60,5],[55,-4],[50,-5],[44,-9],[40,-9],[37,-6],[38,12],[37,15],[40,18],[42,13],[44,8],[48,1],[51,2],[53,8],[55,12],[60,20],[68,25],[70,28],[71,28]],
+    // Africa
+    [[37,-6],[35,10],[33,22],[31,32],[20,37],[12,42],[5,40],[-2,40],[-12,40],[-22,35],[-34,25],[-35,18],[-30,15],[-20,12],[-5,9],[5,8],[8,4],[15,-17],[25,-17],[33,-10],[37,-6]],
+    // Asia (simplified)
+    [[70,30],[70,80],[75,110],[73,140],[70,165],[65,175],[60,165],[55,140],[50,130],[40,130],[35,140],[30,122],[22,115],[10,108],[5,103],[8,98],[15,95],[20,90],[25,85],[30,75],[35,65],[42,50],[48,45],[55,50],[65,55],[70,30]],
+    // India (subcontinent)
+    [[30,73],[28,77],[22,88],[15,80],[8,78],[15,73],[25,70],[30,73]],
+    // Southeast Asia / Indonesia
+    [[5,95],[8,100],[5,105],[0,110],[-5,115],[-8,120],[-10,125],[-8,130],[-3,135],[2,130],[5,125],[8,120],[5,110],[3,100],[5,95]],
+    // Australia
+    [[-12,131],[-12,142],[-18,146],[-25,153],[-35,150],[-38,142],[-35,135],[-32,125],[-25,113],[-18,122],[-12,131]],
+    // Antarctica (simplified band)
+    [[-72,-180],[-75,-90],[-80,0],[-78,90],[-75,180],[-72,-180]],
+    // Greenland
+    [[83,-30],[80,-20],[70,-25],[65,-40],[70,-50],[75,-55],[80,-45],[83,-30]],
+    // UK
+    [[58,-4],[55,-6],[51,-5],[50,1],[53,1],[56,-2],[58,-4]],
+    // Japan
+    [[45,141],[40,140],[35,135],[32,130],[35,140],[40,142],[45,141]],
+    // Madagascar
+    [[-12,49],[-15,48],[-20,48],[-25,47],[-22,44],[-15,46],[-12,49]],
+    // New Zealand
+    [[-35,173],[-40,175],[-45,167],[-42,172],[-35,173]],
+  ];
+
+  // Draw continents as filled shapes with glow
+  ctx.fillStyle = '#1a3a2a';
+  ctx.strokeStyle = '#2a5a4a';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = '#3a7a5a';
+  ctx.shadowBlur = 8;
+  for (const cont of continents) {
+    ctx.beginPath();
+    for (let i = 0; i < cont.length; i++) {
+      const [x, y] = ll(cont[i][0], cont[i][1]);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+
+  // Draw country borders as subtle grid lines within continents
+  ctx.strokeStyle = 'rgba(60, 100, 80, 0.3)';
+  ctx.lineWidth = 1;
+  for (let lat = -60; lat <= 70; lat += 10) {
+    ctx.beginPath();
+    for (let lon = -180; lon <= 180; lon += 2) {
+      const [x, y] = ll(lat, lon);
+      if (lon === -180) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  for (let lon = -180; lon < 180; lon += 15) {
+    ctx.beginPath();
+    for (let lat = -80; lat <= 80; lat += 2) {
+      const [x, y] = ll(lat, lon);
+      if (lat === -80) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
 
 function initGlobe() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x050810);
-  scene.fog = new THREE.Fog(0x050810, 200, 800);
+  scene.fog = new THREE.Fog(0x050810, 250, 800);
 
   camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 2000);
   camera.position.set(0, 60, 280);
@@ -219,229 +238,219 @@ function initGlobe() {
   document.getElementById('globe-canvas').appendChild(renderer.domElement);
 
   raycaster = new THREE.Raycaster();
-  raycaster.params.Points.threshold = 1.5;
+  raycaster.params.Points.threshold = 2;
   mouse = new THREE.Vector2();
 
   scene.add(new THREE.AmbientLight(0x404060, 0.5));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.6);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
   dir.position.set(150, 100, 200);
   scene.add(dir);
 
-  addStars();
-  addGlobe();
-  addContinentOutlines();
-}
-
-function addStars() {
-  const g = new THREE.BufferGeometry();
-  const N = 5000;
-  const pos = new Float32Array(N * 3);
-  for (let i = 0; i < N; i++) {
-    const r = 500 + Math.random() * 800;
-    const phi = Math.random() * Math.PI * 2;
-    const theta = Math.acos(2 * Math.random() - 1);
-    pos[i*3] = r * Math.sin(theta) * Math.cos(phi);
-    pos[i*3+1] = r * Math.sin(theta) * Math.sin(phi);
-    pos[i*3+2] = r * Math.cos(theta);
+  // Stars
+  const sg = new THREE.BufferGeometry();
+  const sp = new Float32Array(5000 * 3);
+  for (let i = 0; i < 5000; i++) {
+    const r = 500 + Math.random() * 800, phi = Math.random() * Math.PI * 2, theta = Math.acos(2 * Math.random() - 1);
+    sp[i*3]=r*Math.sin(theta)*Math.cos(phi); sp[i*3+1]=r*Math.sin(theta)*Math.sin(phi); sp[i*3+2]=r*Math.cos(theta);
   }
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  scene.add(new THREE.Points(g, new THREE.PointsMaterial({
-    color: 0xffffff, size: 0.8, transparent: true, opacity: 0.5,
-    sizeAttenuation: true, depthWrite: false,
-  })));
-}
+  sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+  scene.add(new THREE.Points(sg, new THREE.PointsMaterial({color:0xffffff,size:0.8,transparent:true,opacity:0.5,sizeAttenuation:true,depthWrite:false})));
 
-function addGlobe() {
-  // Dark solid sphere
-  const innerGeo = new THREE.SphereGeometry(R * 0.97, 48, 48);
-  scene.add(new THREE.Mesh(innerGeo, new THREE.MeshPhongMaterial({
-    color: 0x0a1520, transparent: true, opacity: 0.9, shininess: 8,
-  })));
+  // Earth texture
+  earthTexture = createEarthTexture();
 
-  // Wireframe
-  const wireGeo = new THREE.SphereGeometry(R, 64, 64);
-  globe = new THREE.Mesh(wireGeo, new THREE.MeshBasicMaterial({
-    color: 0x1a2a3a, wireframe: true, transparent: true, opacity: 0.3,
+  // Globe with texture
+  const globeGeo = new THREE.SphereGeometry(R, 64, 64);
+  globe = new THREE.Mesh(globeGeo, new THREE.MeshPhongMaterial({
+    map: earthTexture, transparent: true, opacity: 0.85, shininess: 5,
   }));
   scene.add(globe);
 
-  // Lat/lon grid
-  const gridMat = new THREE.LineBasicMaterial({ color: 0x2a3a4a, transparent: true, opacity: 0.15 });
-  for (let lat = -75; lat <= 75; lat += 15) {
-    const pts = [];
-    for (let lon = -180; lon <= 180; lon += 3)
-      pts.push(latLonToVec3(lat, lon, R * 1.002));
-    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
-  }
-  for (let lon = -180; lon < 180; lon += 15) {
-    const pts = [];
-    for (let lat = -88; lat <= 88; lat += 3)
-      pts.push(latLonToVec3(lat, lon, R * 1.002));
-    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), gridMat));
-  }
-}
-
-// ─── Simplified continent outlines (coastline points) ─────────────────────────
-function addContinentOutlines() {
-  // Simplified continent outlines — a few dozen points per continent
-  // Drawn as line loops on the globe surface
-  const continents = [
-    // North America (simplified)
-    [[71,-156],[70,-130],[60,-140],[49,-125],[32,-117],[23,-110],[18,-92],[25,-80],
-     [30,-80],[35,-75],[45,-65],[50,-55],[60,-65],[70,-80],[75,-100],[71,-156]],
-    // South America
-    [[12,-72],[10,-65],[5,-52],[-3,-44],[-23,-40],[-34,-52],[-52,-68],[-55,-70],
-     [-50,-73],[-35,-72],[-18,-71],[-10,-78],[0,-79],[5,-77],[12,-72]],
-    // Europe + Africa (simplified, connected)
-    [[70,28],[65,22],[58,8],[50,-5],[44,-9],[36,-6],[35,10],[31,32],[20,38],
-     [12,42],[0,10],[-5,9],[-15,12],[-25,18],[-34,20],[-35,18],[-30,32],[-12,40],
-     [0,45],[12,50],[25,55],[35,55],[45,40],[55,38],[65,35],[70,28]],
-    // Asia (simplified)
-    [[70,40],[70,80],[75,120],[72,160],[65,175],[60,165],[55,140],[45,140],
-     [35,130],[30,120],[20,110],[10,105],[5,100],[8,95],[20,90],[25,85],
-     [30,75],[35,60],[42,48],[50,45],[60,50],[70,40]],
-    // Australia
-    [[-12,131],[-12,142],[-18,145],[-25,153],[-35,150],[-38,142],[-35,135],
-     [-32,125],[-25,113],[-18,122],[-12,131]],
-    // Antarctica (simplified ring)
-    [[-75,-170],[-78,-140],[-80,-100],[-82,-60],[-80,-20],[-78,20],[-80,60],
-     [-82,100],[-80,140],[-78,170],[-75,-170]],
-  ];
-
-  const mat = new THREE.LineBasicMaterial({ color: 0x3a5070, transparent: true, opacity: 0.35 });
-  for (const continent of continents) {
-    const pts = continent.map(([lat, lon]) => latLonToVec3(lat, lon, R * 1.004));
-    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
-  }
+  // Atmosphere glow
+  const atmGeo = new THREE.SphereGeometry(R * 1.04, 32, 32);
+  scene.add(new THREE.Mesh(atmGeo, new THREE.MeshBasicMaterial({
+    color: 0x3060a0, transparent: true, opacity: 0.08, side: THREE.BackSide,
+  })));
 }
 
 // ─── Data loading ────────────────────────────────────────────────────────────
 function loadAgents() {
-  fetch('data/agents.json')
-    .then(r => r.json())
-    .then(data => {
-      agents = (data.agents || []).map(a => {
-        const kind = classifyAgent(a.name, a.description, a.namespace);
-        const region = regionForAgent(a.name, a.namespace);
-        return {
-          ...a, kind,
-          regionLabel: region.label,
-          lat: region.lat, lon: region.lon,
-          position: latLonToVec3(region.lat, region.lon, PR),
-        };
-      });
-
-      // Stats
-      const total = agents.length;
-      const x402 = agents.filter(a => a.x402).length;
-      const barter = agents.filter(a => a.barter).length;
-      const cards = agents.filter(a => a.agent_card).length;
-      const regions = new Set(agents.map(a => a.regionLabel));
-
-      document.getElementById('stat-total').textContent = total.toLocaleString();
-      document.getElementById('stat-x402').textContent = x402;
-      document.getElementById('stat-barter').textContent = barter;
-      document.getElementById('stat-cards').textContent = cards;
-      document.getElementById('stat-regions').textContent = regions.size;
-
-      // Filter counts
-      ['firewall','payment','compute','directory','publisher','bridge','observer'].forEach(k => {
-        const c = agents.filter(a => a.kind === k).length;
-        const el = document.querySelector(`[data-filter="${k}"] .count`);
-        if (el) el.textContent = c;
-      });
-      document.querySelector('[data-filter="x402"] .count').textContent = x402;
-      document.querySelector('[data-filter="barter"] .count').textContent = barter;
-
-      document.getElementById('footer-text').textContent =
-        `${total} agents · ${data.total_versions} versions · ${regions.size} locations · ${data.scan_time} · registry.modelcontextprotocol.io`;
-
-      document.getElementById('loader').classList.add('hidden');
-      applyFilter('all');
+  fetch('data/agents.json').then(r => r.json()).then(data => {
+    agents = (data.agents || []).map(a => {
+      const kind = classifyAgent(a.name, a.description, a.namespace);
+      const region = regionForAgent(a.name, a.namespace);
+      return { ...a, kind, regionLabel: region.label, country: region.country || 'Global',
+               lat: region.lat, lon: region.lon,
+               position: latLonToVec3(region.lat, region.lon, PR) };
     });
+
+    const total = agents.length;
+    const x402 = agents.filter(a => a.x402).length;
+    const barter = agents.filter(a => a.barter).length;
+    const cards = agents.filter(a => a.agent_card).length;
+    const countries = new Set(agents.map(a => a.country));
+
+    document.getElementById('stat-total').textContent = total.toLocaleString();
+    document.getElementById('stat-x402').textContent = x402;
+    document.getElementById('stat-barter').textContent = barter;
+    document.getElementById('stat-cards').textContent = cards;
+    document.getElementById('stat-regions').textContent = countries.size;
+
+    ['firewall','payment','compute','directory','publisher','bridge','observer'].forEach(k => {
+      const c = agents.filter(a => a.kind === k).length;
+      const el = document.querySelector(`[data-filter="${k}"] .count`);
+      if (el) el.textContent = c;
+    });
+    document.querySelector('[data-filter="x402"] .count').textContent = x402;
+    document.querySelector('[data-filter="barter"] .count').textContent = barter;
+
+    // Populate country filter
+    const countrySet = new Set(agents.map(a => a.country).filter(c => c && c !== 'Global'));
+    const sortedCountries = [...countrySet].sort();
+    const countrySelect = document.getElementById('country-filter');
+    if (countrySelect) {
+      sortedCountries.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c; opt.textContent = c;
+        countrySelect.appendChild(opt);
+      });
+    }
+
+    document.getElementById('footer-text').textContent =
+      `${total} agents · ${data.total_versions} versions · ${countries.size} countries · ${data.scan_time} · registry.modelcontextprotocol.io`;
+
+    document.getElementById('loader').classList.add('hidden');
+    applyFilter('all');
+  });
 }
 
-// ─── Filtering ───────────────────────────────────────────────────────────────
+// ─── Filtering ────────────────────────────────────────────────────────────────
 function applyFilter(filter) {
   activeFilter = filter;
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.filter === filter);
-  });
+  document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.filter === filter));
   const search = document.getElementById('search').value.toLowerCase();
+  const countryFilter = document.getElementById('country-filter')?.value || '';
+
   if (filter === 'all') filteredAgents = agents;
   else if (filter === 'x402') filteredAgents = agents.filter(a => a.x402);
   else if (filter === 'barter') filteredAgents = agents.filter(a => a.barter);
   else filteredAgents = agents.filter(a => a.kind === filter);
+
   if (search) {
     filteredAgents = filteredAgents.filter(a =>
-      a.name.toLowerCase().includes(search) ||
-      a.description.toLowerCase().includes(search) ||
-      a.namespace.toLowerCase().includes(search));
+      a.name.toLowerCase().includes(search) || a.description.toLowerCase().includes(search) ||
+      a.namespace.toLowerCase().includes(search) || a.regionLabel.toLowerCase().includes(search));
   }
+  if (countryFilter) {
+    filteredAgents = filteredAgents.filter(a => a.country === countryFilter);
+  }
+
   renderPoints();
+  renderConnections();
   document.getElementById('stat-total').textContent = filteredAgents.length.toLocaleString();
 }
 
-// ─── Point rendering ─────────────────────────────────────────────────────────
+// ─── Point rendering (glowing sprites) ───────────────────────────────────────
 function pointTexture() {
   const c = document.createElement('canvas');
   c.width = 64; c.height = 64;
   const ctx = c.getContext('2d');
   const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.3, 'rgba(255,255,255,0.7)');
-  g.addColorStop(0.7, 'rgba(255,255,255,0.1)');
+  g.addColorStop(0.2, 'rgba(255,255,255,0.9)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.3)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
 }
 
+let pointTex;
 function renderPoints() {
-  if (pointsObj) {
-    scene.remove(pointsObj);
-    pointsObj.geometry.dispose(); pointsObj.material.dispose();
-  }
+  if (pointsObj) { scene.remove(pointsObj); pointsObj.geometry.dispose(); pointsObj.material.dispose(); }
   if (!filteredAgents.length) return;
+
   const N = filteredAgents.length;
   const pos = new Float32Array(N * 3);
   const col = new Float32Array(N * 3);
+
   for (let i = 0; i < N; i++) {
     const a = filteredAgents[i];
     pos[i*3] = a.position.x; pos[i*3+1] = a.position.y; pos[i*3+2] = a.position.z;
     const c = new THREE.Color(KIND_COLORS[a.kind] || 0xffffff);
-    if (a.x402) c.multiplyScalar(1.8);
-    if (a.barter) c.multiplyScalar(2.0);
+    if (a.x402) c.multiplyScalar(2.0);
+    if (a.barter) c.multiplyScalar(2.5);
     col[i*3] = Math.min(c.r, 1); col[i*3+1] = Math.min(c.g, 1); col[i*3+2] = Math.min(c.b, 1);
   }
+
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+
+  if (!pointTex) pointTex = pointTexture();
   const mat = new THREE.PointsMaterial({
-    size: 1.8, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 0.9, map: pointTexture(),
+    size: 2.5, sizeAttenuation: true, vertexColors: true,
+    transparent: true, opacity: 0.9, map: pointTex,
     alphaTest: 0.01, blending: THREE.AdditiveBlending, depthWrite: false,
   });
+
   pointsObj = new THREE.Points(geo, mat);
   pointsObj.userData.agents = filteredAgents;
   scene.add(pointsObj);
 }
 
+// ─── Connection arcs between agents ──────────────────────────────────────────
+function renderConnections() {
+  // Remove old connections
+  connectionLines.forEach(l => { scene.remove(l); l.geometry.dispose(); l.material.dispose(); });
+  connectionLines = [];
+
+  // Draw connections from x402 agents to barter agents, and from firewall to payment
+  const x402Agents = filteredAgents.filter(a => a.x402);
+  const barterAgents = filteredAgents.filter(a => a.barter);
+  const firewallAgents = filteredAgents.filter(a => a.kind === 'firewall');
+  const paymentAgents = filteredAgents.filter(a => a.kind === 'payment').slice(0, 20);
+
+  // x402 → barter connections
+  x402Agents.forEach(a => {
+    barterAgents.forEach(b => {
+      if (a.name === b.name) return;
+      const arc = createArc(a.position, b.position, 0x00d4ff, 0.4);
+      if (arc) { scene.add(arc); connectionLines.push(arc); }
+    });
+  });
+
+  // firewall → payment connections
+  firewallAgents.forEach(a => {
+    paymentAgents.forEach(b => {
+      if (a.name === b.name) return;
+      const arc = createArc(a.position, b.position, 0xff6b35, 0.3);
+      if (arc) { scene.add(arc); connectionLines.push(arc); }
+    });
+  });
+}
+
+function createArc(p1, p2, color, opacity) {
+  if (!p1 || !p2) return null;
+  const mid = new THREE.Vector3().lerpVectors(p1, p2, 0.5);
+  mid.normalize().multiplyScalar(PR * 1.3); // arc above the surface
+  const curve = new THREE.QuadraticBezierCurve3(p1, mid, p2);
+  const points = curve.getPoints(30);
+  const geo = new THREE.BufferGeometry().setFromPoints(points);
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  return new THREE.Line(geo, mat);
+}
+
 // ─── Interaction ─────────────────────────────────────────────────────────────
 let isDragging = false, prevX = 0, prevY = 0;
-let rotY = 0, rotX = 0, velY = 0.0006, velX = 0;
+let rotY = 0, rotX = 0, velY = 0.0005, velX = 0;
 let camDist = 280, camDistTarget = 280;
-let mouseOnGlobe = false;
-let mouseSX = 0, mouseSY = 0;
+let mouseOnGlobe = false, mouseSX = 0, mouseSY = 0;
 
-function onPointerDown(e) {
-  isDragging = true; prevX = e.clientX; prevY = e.clientY;
-}
+function onPointerDown(e) { isDragging = true; prevX = e.clientX; prevY = e.clientY; }
 function onPointerMove(e) {
-  mouseSX = e.clientX; mouseSY = e.clientY;
-  mouseOnGlobe = true;
+  mouseSX = e.clientX; mouseSY = e.clientY; mouseOnGlobe = true;
   if (isDragging) {
-    velY = (e.clientX - prevX) * 0.006;
-    velX = (e.clientY - prevY) * 0.006;
+    velY = (e.clientX - prevX) * 0.006; velX = (e.clientY - prevY) * 0.006;
     rotY += velY; rotX += velX;
     rotX = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, rotX));
     prevX = e.clientX; prevY = e.clientY;
@@ -454,9 +463,8 @@ function onPointerMove(e) {
 }
 function onPointerLeave() { isDragging = false; mouseOnGlobe = false; }
 function onPointerUp() { isDragging = false; }
-
 function onWheel(e) {
-  camDistTarget *= 1 + (e.deltaY > 0 ? 0.15 : -0.15);
+  camDistTarget *= 1 + (e.deltaY > 0 ? 0.12 : -0.12);
   camDistTarget = Math.max(110, Math.min(600, camDistTarget));
   e.preventDefault();
 }
@@ -469,81 +477,62 @@ function checkHover() {
   if (hits.length > 0) {
     hoveredIdx = hits[0].index;
     const a = filteredAgents[hoveredIdx];
-    tt.innerHTML = `<div class="t-name">${a.name}</div><div class="t-meta">${a.regionLabel} · v${a.version} · ${a.kind}${a.x402 ? ' · x402' : ''}${a.barter ? ' · barter' : ''}</div>`;
-    tt.style.left = (mouseSX + 14) + 'px';
-    tt.style.top = (mouseSY + 14) + 'px';
-    tt.classList.add('visible');
-    document.body.style.cursor = 'pointer';
+    tt.innerHTML = `<div class="t-name">${a.name}</div><div class="t-meta">${a.regionLabel} · ${a.country} · ${a.kind}${a.x402?' · x402':''}${a.barter?' · barter':''}</div>`;
+    tt.style.left = (mouseSX + 14) + 'px'; tt.style.top = (mouseSY + 14) + 'px';
+    tt.classList.add('visible'); document.body.style.cursor = 'pointer';
   } else {
-    hoveredIdx = -1;
-    tt.classList.remove('visible');
-    document.body.style.cursor = 'default';
+    hoveredIdx = -1; tt.classList.remove('visible'); document.body.style.cursor = 'default';
   }
 }
 
-function onClick() {
-  if (hoveredIdx >= 0) showPanel(filteredAgents[hoveredIdx]);
-}
+function onClick() { if (hoveredIdx >= 0) showPanel(filteredAgents[hoveredIdx]); }
 
-// ─── Agent detail panel ──────────────────────────────────────────────────────
+// ─── Agent detail panel ─────────────────────────────────────────────────────
 function showPanel(a) {
-  const kc = { firewall:'#ff6b35', payment:'#00d4ff', compute:'#a78bfa',
-    directory:'#fbbf24', publisher:'#22c55e', bridge:'#ec4899',
-    observer:'#f43f5e', consumer:'#94a3b8' };
+  const kc = {firewall:'#ff6b35',payment:'#00d4ff',compute:'#a78bfa',directory:'#fbbf24',publisher:'#22c55e',bridge:'#ec4899',observer:'#f43f5e',consumer:'#94a3b8'};
   const color = kc[a.kind];
-
-  // Capabilities
   const caps = [];
   if (a.x402) caps.push(`<span class="cap-tag" style="background:rgba(0,212,255,0.1);color:#00d4ff;border:1px solid rgba(0,212,255,0.3)">💰 x402 Payments</span>`);
   if (a.barter) caps.push(`<span class="cap-tag" style="background:rgba(255,107,53,0.1);color:#ff6b35;border:1px solid rgba(255,107,53,0.3)">🔁 Barter Accepted</span>`);
   if (a.agent_card) caps.push(`<span class="cap-tag" style="background:rgba(167,139,250,0.1);color:#a78bfa;border:1px solid rgba(167,139,250,0.3)">🪪 Agent Card</span>`);
   caps.push(`<span class="cap-tag" style="background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.3)">📍 ${a.regionLabel}</span>`);
 
-  // Protocol info
-  const protocols = ['MCP'];
-  if (a.x402) protocols.push('x402');
-  if (a.barter) protocols.push('Barter');
-  if (a.agent_card) protocols.push('A2A');
-
-  // Links
+  const protocols = ['MCP']; if (a.x402) protocols.push('x402'); if (a.barter) protocols.push('Barter'); if (a.agent_card) protocols.push('A2A');
   const links = [];
   if (a.website) links.push(`<a class="link-item" href="${a.website}" target="_blank" rel="noopener">🌐 ${a.website}</a>`);
   if (a.repository) links.push(`<a class="link-item" href="${a.repository}" target="_blank" rel="noopener">📦 ${a.repository}</a>`);
   if (a.agent_card) links.push(`<a class="link-item" href="${a.agent_card}" target="_blank" rel="noopener">🪪 ${a.agent_card}</a>`);
   links.push(`<a class="link-item" href="https://registry.modelcontextprotocol.io/v0/servers?cursor=${encodeURIComponent(a.namespace)}&limit=20" target="_blank" rel="noopener">🔍 View in MCP Registry</a>`);
 
-  // Connections: find nearby agents (same region + same kind, or x402 ↔ barter)
-  const nearby = agents
-    .filter(x => x.name !== a.name)
-    .filter(x => {
-      if (a.x402 && x.barter) return true;  // x402 agents connect to barter agents
-      if (a.barter && x.x402) return true;
-      if (x.kind === a.kind && x.regionLabel === a.regionLabel) return true;  // same kind + region
-      return false;
-    })
-    .slice(0, 8);
+  // Connections: find related agents
+  const nearby = agents.filter(x => x.name !== a.name).filter(x => {
+    if (a.x402 && x.barter) return true;
+    if (a.barter && x.x402) return true;
+    if (x.kind === a.kind && x.country === a.country) return true;
+    return false;
+  }).slice(0, 10);
   const connectionsHTML = nearby.length ? `
-    <div class="sidebar-section" style="margin-top:16px">
-      <h3 style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-dim);margin-bottom:8px">Connections (${nearby.length})</h3>
-      ${nearby.map(x => `<div style="padding:6px 10px;margin-bottom:4px;background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--mono);cursor:pointer;color:${kc[x.kind]||'#888'}" onclick="showPanelByName('${x.name.replace(/'/g,"\\'")}')">${x.name}</div>`).join('')}
+    <div style="margin-top:16px">
+      <h3 style="font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-dim);margin-bottom:8px">Connected Agents (${nearby.length})</h3>
+      ${nearby.map(x => `<div style="padding:6px 10px;margin-bottom:4px;background:rgba(255,255,255,0.03);border:1px solid rgba(100,130,180,0.15);border-radius:6px;font-size:11px;font-family:var(--mono);cursor:pointer;color:${kc[x.kind]||'#888'}" onclick="showPanelByName('${x.name.replace(/'/g,"\\'")}')">${x.name} <span style="float:right;opacity:0.5">${x.regionLabel}</span></div>`).join('')}
     </div>` : '';
 
   document.getElementById('panel-content').innerHTML = `
     <div class="kind-badge" style="background:${color};color:#000">${KIND_LABELS[a.kind] || a.kind}</div>
     <div class="agent-title">${a.name}</div>
-    <div class="agent-version">v${a.version} · ${a.versions.length} versions published</div>
+    <div class="agent-version">v${a.version} · ${a.versions.length} versions</div>
     <div class="agent-desc">${a.description || '(no description)'}</div>
     <div class="agent-capabilities">${caps.join('')}</div>
     ${a.wallet ? `<div class="wallet-box"><div class="label">x402 Wallet (USDC)</div><div class="value">${a.wallet}</div></div>` : ''}
     <div class="info-grid">
-      <div class="info-card"><div class="label">First seen</div><div class="value">${a.first_seen}</div></div>
-      <div class="info-card"><div class="label">Last seen</div><div class="value">${a.last_seen}</div></div>
+      <div class="info-card"><div class="label">Type</div><div class="value">${a.kind}</div></div>
       <div class="info-card"><div class="label">Location</div><div class="value">${a.regionLabel}</div></div>
+      <div class="info-card"><div class="label">Country</div><div class="value">${a.country}</div></div>
       <div class="info-card"><div class="label">Coordinates</div><div class="value">${a.lat.toFixed(2)}°, ${a.lon.toFixed(2)}°</div></div>
-      <div class="info-card"><div class="label">Namespace</div><div class="value">${a.namespace}</div></div>
       <div class="info-card"><div class="label">Protocols</div><div class="value">${protocols.join(' + ')}</div></div>
-      <div class="info-card"><div class="label">Agent type</div><div class="value">${a.kind}</div></div>
       <div class="info-card"><div class="label">Versions</div><div class="value">${a.versions.length}</div></div>
+      <div class="info-card"><div class="label">Namespace</div><div class="value">${a.namespace}</div></div>
+      <div class="info-card"><div class="label">First seen</div><div class="value">${a.first_seen}</div></div>
     </div>
     <div class="link-list">${links.join('')}</div>
     ${connectionsHTML}
@@ -551,40 +540,33 @@ function showPanel(a) {
   document.getElementById('panel-right').classList.add('open');
 }
 
-// Global function for clicking connections inside the panel
-window.showPanelByName = function(name) {
-  const a = agents.find(x => x.name === name);
-  if (a) showPanel(a);
-};
-
+window.showPanelByName = function(name) { const a = agents.find(x => x.name === name); if (a) showPanel(a); };
 function closePanel() { document.getElementById('panel-right').classList.remove('open'); }
 
-// ─── Animation loop with pause + smooth zoom ────────────────────────────────
+// ─── Animation ──────────────────────────────────────────────────────────────
+let pulseT = 0;
 function animate() {
   requestAnimationFrame(animate);
+  pulseT += 0.02;
 
-  // Pause: stop rotation if paused OR if mouse is over the globe
   if (!isDragging) {
     if (!isPaused && !mouseOnGlobe) {
       rotY += velY; rotX += velX;
-      velY = velY * 0.96 + 0.0006;  // auto-rotate
-      velX *= 0.96;
-    } else if (isPaused) {
-      velY *= 0.9; velX *= 0.9;  // decelerate when paused
-    } else if (mouseOnGlobe) {
-      velY *= 0.85; velX *= 0.85;  // slow down when hovering
-    }
+      velY = velY * 0.96 + 0.0005; velX *= 0.96;
+    } else { velY *= 0.9; velX *= 0.9; }
   }
 
-  // Smooth zoom interpolation
   camDist += (camDistTarget - camDist) * 0.1;
 
-  // Apply rotation to all scene objects
   scene.children.forEach(obj => {
     if (obj === pointsObj || obj === globe || obj instanceof THREE.Line || obj instanceof THREE.Points || obj instanceof THREE.Mesh) {
-      obj.rotation.y = rotY;
-      obj.rotation.x = rotX;
+      obj.rotation.y = rotY; obj.rotation.x = rotX;
     }
+  });
+
+  // Pulse the connection lines
+  connectionLines.forEach((l, i) => {
+    if (l.material) l.material.opacity = 0.2 + Math.sin(pulseT + i * 0.5) * 0.15;
   });
 
   camera.position.z = camDist;
@@ -593,15 +575,11 @@ function animate() {
 
 // ─── Init ───────────────────────────────────────────────────────────────────
 window.addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
 });
 
 window.addEventListener('load', () => {
-  initGlobe();
-  animate();
-
+  initGlobe(); animate();
   const canvas = document.getElementById('globe-canvas');
   canvas.addEventListener('pointerdown', onPointerDown);
   canvas.addEventListener('pointermove', onPointerMove);
@@ -609,21 +587,14 @@ window.addEventListener('load', () => {
   canvas.addEventListener('pointerleave', onPointerLeave);
   canvas.addEventListener('wheel', onWheel, { passive: false });
   canvas.addEventListener('click', onClick);
-
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.addEventListener('click', () => applyFilter(btn.dataset.filter));
-  });
+  document.querySelectorAll('.filter-btn').forEach(btn => btn.addEventListener('click', () => applyFilter(btn.dataset.filter)));
   document.getElementById('search').addEventListener('input', () => applyFilter(activeFilter));
+  document.getElementById('country-filter')?.addEventListener('change', () => applyFilter(activeFilter));
   document.getElementById('panel-close').addEventListener('click', closePanel);
-  document.getElementById('toggle-sidebar').addEventListener('click', () => {
-    document.getElementById('sidebar-left').classList.toggle('collapsed');
-  });
-
-  // Pause button
+  document.getElementById('toggle-sidebar').addEventListener('click', () => document.getElementById('sidebar-left').classList.toggle('collapsed'));
   document.getElementById('btn-pause').addEventListener('click', () => {
     isPaused = !isPaused;
     document.getElementById('btn-pause').textContent = isPaused ? '▶ Play' : '⏸ Pause';
   });
-
   loadAgents();
 });
