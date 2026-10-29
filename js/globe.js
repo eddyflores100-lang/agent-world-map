@@ -334,37 +334,7 @@ function renderPoints() {
   pointsObj.userData.agents = filteredAgents;
   pointsObj.renderOrder = 999;
   scene.add(pointsObj);
-}unction renderPoints() {
-  if (pointsObj) { scene.remove(pointsObj); pointsObj.geometry.dispose(); pointsObj.material.dispose(); }
-  if (!filteredAgents.length) return;
-  const N = filteredAgents.length;
-  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
-  for (let i = 0; i < N; i++) {
-    const a = filteredAgents[i];
-    pos[i*3] = a.position.x; pos[i*3+1] = a.position.y; pos[i*3+2] = a.position.z;
-    const c = new THREE.Color(KIND_COLORS[a.kind] || 0xffffff);
-    // Boost brightness for x402/barter
-    if (a.x402) c.multiplyScalar(2.0);
-    if (a.barter) c.multiplyScalar(3.0);
-    // Clamp to max 1.0 but keep the color saturated
-    col[i*3] = Math.min(c.r, 1); col[i*3+1] = Math.min(c.g, 1); col[i*3+2] = Math.min(c.b, 1);
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  if (!pointTex) pointTex = ledTexture();
-  const mat = new THREE.PointsMaterial({
-    size: 4, sizeAttenuation: true, vertexColors: true,
-    transparent: true, opacity: 1.0, map: pointTex,
-    alphaTest: 0.01,
-    blending: THREE.NormalBlending,
-    depthWrite: false, depthTest: true,
-  });
-  pointsObj = new THREE.Points(geo, mat);
-  pointsObj.userData.agents = filteredAgents;
-  scene.add(pointsObj);
 }
-
 // ─── Connection arcs ──────────────────────────────────────────────────────────
 function renderConnections() {
   connectionLines.forEach(l => { scene.remove(l); l.geometry.dispose(); l.material.dispose(); });
