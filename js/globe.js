@@ -319,6 +319,30 @@ function renderPoints() {
     const a = filteredAgents[i];
     pos[i*3] = a.position.x; pos[i*3+1] = a.position.y; pos[i*3+2] = a.position.z;
     const c = new THREE.Color(KIND_COLORS[a.kind] || 0xffffff);
+    col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({
+    size: 3, sizeAttenuation: true, vertexColors: true,
+    transparent: false, opacity: 1.0,
+    depthTest: false, depthWrite: false,
+    blending: THREE.NormalBlending,
+  });
+  pointsObj = new THREE.Points(geo, mat);
+  pointsObj.userData.agents = filteredAgents;
+  pointsObj.renderOrder = 999;
+  scene.add(pointsObj);
+}unction renderPoints() {
+  if (pointsObj) { scene.remove(pointsObj); pointsObj.geometry.dispose(); pointsObj.material.dispose(); }
+  if (!filteredAgents.length) return;
+  const N = filteredAgents.length;
+  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const a = filteredAgents[i];
+    pos[i*3] = a.position.x; pos[i*3+1] = a.position.y; pos[i*3+2] = a.position.z;
+    const c = new THREE.Color(KIND_COLORS[a.kind] || 0xffffff);
     // Boost brightness for x402/barter
     if (a.x402) c.multiplyScalar(2.0);
     if (a.barter) c.multiplyScalar(3.0);
@@ -499,7 +523,7 @@ function animate() {
   });
   connectionLines.forEach((l, i) => { if (l.material) l.material.opacity = 0.2 + Math.sin(pulseT + i * 0.5) * 0.15; });
   // Pulse the LED dots
-  if (pointsObj && pointsObj.material) { pointsObj.material.size = 4 + Math.sin(pulseT) * 0.4; }
+  if (pointsObj && pointsObj.material) { pointsObj.material.size = 3 + Math.sin(pulseT) * 0.3; }
   // Animate satellites
   const sg = scene.userData.satellites;
   if (sg) {
