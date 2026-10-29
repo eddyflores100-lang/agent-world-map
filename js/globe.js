@@ -136,15 +136,10 @@ function ledTexture() {
   c.width = 64; c.height = 64;
   const ctx = c.getContext('2d');
   // Sharp bright dot: white center → tight glow → nothing
-  // Solid bright dot: hard center + small soft edge
-  ctx.beginPath();
-  ctx.arc(32, 32, 10, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255,255,255,1)';
-  ctx.fill();
-  // Soft glow halo
-  const g = ctx.createRadialGradient(32, 32, 10, 32, 32, 28);
-  g.addColorStop(0, 'rgba(255,255,255,0.8)');
-  g.addColorStop(0.5, 'rgba(255,255,255,0.3)');
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 20);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.3, 'rgba(255,255,255,0.8)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.2)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
@@ -213,14 +208,14 @@ function initGlobe() {
     uniforms: { c: { value: new THREE.Color(0x4080c0) }, p: { value: 4.0 } },
     vertexShader: `varying vec3 vNormal; void main() { vNormal = normalize(normalMatrix * normal); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
     fragmentShader: `uniform vec3 c; uniform float p; varying vec3 vNormal; void main() { float i = pow(0.6 - dot(vNormal, vec3(0.0, 0.0, 1.0)), p); gl_FragColor = vec4(c, 1.0) * i; }`,
-    side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+    side: THREE.BackSide, blending: THREE.NormalBlending, transparent: true, depthWrite: false,
   })));
 
   // ── Country border lines ──────────────────────────────────────────────────
   fetch('data/borders.json').then(r => r.json()).then(borders => {
     const bm = new THREE.LineBasicMaterial({ color: 0x5a7a9a, transparent: true, opacity: 0.35, depthWrite: false });
     borders.forEach(bl => {
-      const pts = bl.map(([lat, lon]) => latLonToVec3(lat, lon, R * 1.006));
+      const pts = bl.map(([lat, lon]) => latLonToVec3(lat, lon, R * 1.002));
       if (pts.length > 1) scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), bm));
     });
   });
@@ -249,7 +244,7 @@ function initGlobe() {
     const pm = new THREE.PointsMaterial({
       color: sat.color, size: 5, sizeAttenuation: true,
       transparent: true, opacity: 1.0, map: ledTex,
-      alphaTest: 0.01, blending: THREE.AdditiveBlending,
+      alphaTest: 0.01, blending: THREE.NormalBlending,
       depthWrite: false, depthTest: false,  // always visible (even behind globe)
     });
     const satPoint = new THREE.Points(sg, pm);
@@ -335,11 +330,11 @@ function renderPoints() {
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   if (!pointTex) pointTex = ledTexture();
   const mat = new THREE.PointsMaterial({
-    size: 5, sizeAttenuation: true, vertexColors: true,
+    size: 4, sizeAttenuation: true, vertexColors: true,
     transparent: true, opacity: 1.0, map: pointTex,
     alphaTest: 0.01,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false, depthTest: false,  // always visible — fix later with custom shader
+    blending: THREE.NormalBlending,
+    depthWrite: false, depthTest: true,
   });
   pointsObj = new THREE.Points(geo, mat);
   pointsObj.userData.agents = filteredAgents;
@@ -504,7 +499,7 @@ function animate() {
   });
   connectionLines.forEach((l, i) => { if (l.material) l.material.opacity = 0.2 + Math.sin(pulseT + i * 0.5) * 0.15; });
   // Pulse the LED dots
-  if (pointsObj && pointsObj.material) { pointsObj.material.size = 5 + Math.sin(pulseT) * 0.4; }
+  if (pointsObj && pointsObj.material) { pointsObj.material.size = 4 + Math.sin(pulseT) * 0.4; }
   // Animate satellites
   const sg = scene.userData.satellites;
   if (sg) {
